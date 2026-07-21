@@ -4,8 +4,6 @@
 
 SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Agent 花费推理成本、修改代码或接触生产系统之前，生成结构化的成功概率、风险等级、预计成本、失败模式和验证计划；任务完成后，再使用真实结果结算预测并计算校准指标。
 
-**在线演示：** [selfodds-preflight.xiaozongzi1989.chatgpt.site](https://selfodds-preflight.xiaozongzi1989.chatgpt.site)
-
 ## 为什么需要 SelfOdds
 
 传统 Agent 评估通常发生在执行之后。SelfOdds 将判断前移：
