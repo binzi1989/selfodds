@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Language = "zh" | "en";
+type AssessmentMode = "project" | "task" | "agent";
 type Outcome = "success" | "failed" | "pending";
 type Source = "agent" | "local" | "sample";
 
@@ -33,6 +34,22 @@ type Run = {
   guardrails?: string[];
   riskSignals?: string[];
   stages?: string[];
+  assessmentKind?: "PROJECT_OPPORTUNITY" | "TASK_FEASIBILITY" | "AGENT_AUDIT";
+  opportunityScore?: number | null;
+  rubricScores?: Record<"demand" | "momentum" | "differentiation" | "buildability" | "distribution" | "evidence", number> | null;
+  recommendedExperiment?: string | null;
+  reasoningGaps?: string[];
+  adversarialTests?: string[];
+  agentImprovement?: string | null;
+  repositoryEvidence?: {
+    status: "verified" | "unavailable" | "not_github";
+    full_name?: string;
+    stars?: number;
+    forks?: number;
+    language?: string;
+    license?: string;
+    pushed_at?: string;
+  };
 };
 
 type AgentResponse = {
@@ -44,6 +61,13 @@ type AgentResponse = {
   agent_version?: string;
   assessment?: {
     goal_summary: string;
+    assessment_kind: "PROJECT_OPPORTUNITY" | "TASK_FEASIBILITY" | "AGENT_AUDIT";
+    opportunity_score: number | null;
+    rubric_scores: Run["rubricScores"];
+    recommended_experiment: string | null;
+    reasoning_gaps: string[];
+    adversarial_tests: string[];
+    agent_improvement: string | null;
     success_probability: number;
     confidence_quality: "LOW" | "MEDIUM" | "HIGH";
     estimated_cost_usd: number;
@@ -64,6 +88,8 @@ type AgentResponse = {
     outside_view_prior: number;
     risk_signals: string[];
     attempted_providers: string[];
+    assessment_mode: AssessmentMode;
+    repository_evidence: NonNullable<Run["repositoryEvidence"]>;
   };
   code?: string;
   message?: string;
@@ -84,6 +110,13 @@ const copy = {
     calibration: "校准分",
     proof: "每次预测都会在执行前封存，并接受真实结果检验。",
     newAssessment: "新建评估",
+    assessmentMode: "评估类型",
+    projectMode: "项目机会",
+    taskMode: "任务执行",
+    agentMode: "Agent 审计",
+    projectModeHint: "判断项目是否值得借鉴，并生成最小实验",
+    taskModeHint: "预测 Coding Agent 完成具体任务的概率",
+    agentModeHint: "检查你写的 Agent 提示词、计划或输出",
     taskBrief: "任务说明",
     taskPlaceholder: "描述 Agent 需要完成的任务……",
     repoContext: "仓库或上下文",
@@ -95,6 +128,22 @@ const copy = {
     decisionToken: "决策令牌",
     sealed: "已封存",
     successProbability: "成功概率",
+    opportunityScore: "项目机会分",
+    executionProbability: "实验执行成功率",
+    rubric: "机会评分依据",
+    recommendedExperiment: "推荐最小实验",
+    repositoryEvidence: "自动读取的仓库证据",
+    evidenceVerified: "GitHub 证据已验证",
+    evidenceUnavailable: "未能读取 GitHub 证据",
+    demand: "需求",
+    momentum: "趋势",
+    differentiation: "差异化",
+    buildability: "可构建性",
+    distribution: "传播性",
+    evidence: "证据",
+    reasoningGaps: "推理缺口",
+    adversarialTests: "对抗验证",
+    agentImprovement: "改进后的 Agent 指令",
     route: "路由",
     risk: "风险",
     time: "预计时间",
@@ -153,6 +202,13 @@ const copy = {
     calibration: "CALIBRATION SCORE",
     proof: "Every forecast is sealed before execution and scored against the real outcome.",
     newAssessment: "NEW ASSESSMENT",
+    assessmentMode: "ASSESSMENT TYPE",
+    projectMode: "PROJECT OPPORTUNITY",
+    taskMode: "TASK EXECUTION",
+    agentMode: "AGENT AUDIT",
+    projectModeHint: "Judge whether a project is worth learning from and propose a minimum experiment",
+    taskModeHint: "Predict whether a coding agent can complete a specific task",
+    agentModeHint: "Audit your agent prompt, plan, or visible output",
     taskBrief: "TASK BRIEF",
     taskPlaceholder: "Describe what the agent should accomplish...",
     repoContext: "REPOSITORY OR CONTEXT",
@@ -164,6 +220,22 @@ const copy = {
     decisionToken: "DECISION TOKEN",
     sealed: "SEALED",
     successProbability: "SUCCESS PROBABILITY",
+    opportunityScore: "OPPORTUNITY SCORE",
+    executionProbability: "EXPERIMENT SUCCESS PROBABILITY",
+    rubric: "OPPORTUNITY RUBRIC",
+    recommendedExperiment: "RECOMMENDED MINIMUM EXPERIMENT",
+    repositoryEvidence: "AUTOMATIC REPOSITORY EVIDENCE",
+    evidenceVerified: "GitHub evidence verified",
+    evidenceUnavailable: "GitHub evidence unavailable",
+    demand: "DEMAND",
+    momentum: "MOMENTUM",
+    differentiation: "DIFFERENTIATION",
+    buildability: "BUILDABILITY",
+    distribution: "DISTRIBUTION",
+    evidence: "EVIDENCE",
+    reasoningGaps: "REASONING GAPS",
+    adversarialTests: "ADVERSARIAL TESTS",
+    agentImprovement: "IMPROVED AGENT INSTRUCTION",
     route: "ROUTE",
     risk: "RISK",
     time: "EST. TIME",
@@ -302,7 +374,7 @@ function hashText(text: string) {
   return hash;
 }
 
-function createLocalAssessment(task: string, repo: string, language: Language): Run {
+function createLocalAssessment(task: string, repo: string, language: Language, mode: AssessmentMode = "task"): Run {
   const normalized = task.toLowerCase();
   const dangerous = [
     "production", "payment", "database", "delete", "migration", "auth", "security", "deploy", "infra", "permission",
@@ -380,6 +452,18 @@ function createLocalAssessment(task: string, repo: string, language: Language): 
     guardrails: [],
     riskSignals: risks,
     stages: ["SENSE", "GUARD"],
+    assessmentKind: mode === "project" ? "PROJECT_OPPORTUNITY" : mode === "agent" ? "AGENT_AUDIT" : "TASK_FEASIBILITY",
+    opportunityScore: mode === "project" ? probability : null,
+    rubricScores: null,
+    recommendedExperiment: mode === "project"
+      ? (zh ? "先用 7 天构建一个只验证核心需求与差异化假设的最小原型。" : "Build a seven-day prototype that tests only the core demand and differentiation assumptions.")
+      : null,
+    reasoningGaps: mode === "agent" ? risks : [],
+    adversarialTests: mode === "agent" ? checks : [],
+    agentImprovement: mode === "agent"
+      ? (zh ? "先明确输入、可用工具、成功标准和停止条件；每个关键结论必须对应可观察证据。" : "Define inputs, tools, success criteria, and stop conditions; connect every material claim to observable evidence.")
+      : null,
+    repositoryEvidence: { status: "unavailable" },
   };
 }
 
@@ -412,6 +496,14 @@ function mapAgentAssessment(response: AgentResponse, task: string, repo: string,
     guardrails: assessment.guardrails_applied,
     riskSignals: response.trace?.risk_signals || [],
     stages: response.trace?.stages || ["SENSE", "CHALLENGE", "DECIDE", "GUARD"],
+    assessmentKind: assessment.assessment_kind,
+    opportunityScore: assessment.opportunity_score,
+    rubricScores: assessment.rubric_scores,
+    recommendedExperiment: assessment.recommended_experiment,
+    reasoningGaps: assessment.reasoning_gaps,
+    adversarialTests: assessment.adversarial_tests,
+    agentImprovement: assessment.agent_improvement,
+    repositoryEvidence: response.trace?.repository_evidence,
   };
 }
 
@@ -426,6 +518,7 @@ function brierScore(runs: Run[]) {
 
 export function PreflightApp() {
   const [language, setLanguage] = useState<Language>("zh");
+  const [mode, setMode] = useState<AssessmentMode>("project");
   const [task, setTask] = useState("修复支付服务中的重复 Webhook 处理，并补充幂等性测试");
   const [repo, setRepo] = useState("github.com/acme/payments-api");
   const [runs, setRuns] = useState<Run[]>(sampleRuns);
@@ -490,14 +583,14 @@ export function PreflightApp() {
       const request = await fetch("/api/preflight", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ task, repository: repo, language }),
+        body: JSON.stringify({ task, repository: repo, language, mode }),
       });
       const response = await request.json() as AgentResponse;
       if (!request.ok || !response.ok || !response.assessment) throw new Error(response.code || "AGENT_UNAVAILABLE");
       assessment = mapAgentAssessment(response, task, repo, language);
       setNotice(`${t.agentReady} ${response.provider ? `${response.provider.toUpperCase()} · ` : ""}${response.model || ""}`.trim());
     } catch {
-      assessment = createLocalAssessment(task, repo, language);
+      assessment = createLocalAssessment(task, repo, language, mode);
       setNotice(t.fallback);
     }
 
@@ -560,6 +653,18 @@ export function PreflightApp() {
       <section className="workspace" aria-label="Agent preflight workspace">
         <form className="task-panel" onSubmit={runPreflight}>
           <div className="panel-heading"><span>{t.newAssessment}</span><span className="step-label">INPUT / 01</span></div>
+          <label>{t.assessmentMode}</label>
+          <div className="mode-switch" role="group" aria-label={t.assessmentMode}>
+            <button type="button" className={mode === "project" ? "active" : ""} onClick={() => setMode("project")}>
+              <strong>{t.projectMode}</strong><span>{t.projectModeHint}</span>
+            </button>
+            <button type="button" className={mode === "task" ? "active" : ""} onClick={() => setMode("task")}>
+              <strong>{t.taskMode}</strong><span>{t.taskModeHint}</span>
+            </button>
+            <button type="button" className={mode === "agent" ? "active" : ""} onClick={() => setMode("agent")}>
+              <strong>{t.agentMode}</strong><span>{t.agentModeHint}</span>
+            </button>
+          </div>
           <label htmlFor="task">{t.taskBrief}</label>
           <textarea id="task" value={task} onChange={(event) => setTask(event.target.value)} rows={5} placeholder={t.taskPlaceholder} required />
           <label htmlFor="repo">{t.repoContext}</label>
@@ -585,8 +690,40 @@ export function PreflightApp() {
           {activeRun.goalSummary && (
             <div className="goal-summary"><span>{t.goalSummary}</span><p>{activeRun.goalSummary}</p></div>
           )}
+          {activeRun.assessmentKind === "PROJECT_OPPORTUNITY" && activeRun.opportunityScore !== null && activeRun.opportunityScore !== undefined && (
+            <section className="opportunity-card">
+              <div className="opportunity-score"><strong>{activeRun.opportunityScore}</strong><span>/100<br />{t.opportunityScore}</span></div>
+              {activeRun.rubricScores && (
+                <div className="rubric-grid">
+                  {([
+                    ["demand", t.demand], ["momentum", t.momentum], ["differentiation", t.differentiation],
+                    ["buildability", t.buildability], ["distribution", t.distribution], ["evidence", t.evidence],
+                  ] as const).map(([key, label]) => <div key={key}><span>{label}</span><strong>{activeRun.rubricScores![key]}</strong></div>)}
+                </div>
+              )}
+              {activeRun.recommendedExperiment && <div className="experiment-line"><span>{t.recommendedExperiment}</span><p>{activeRun.recommendedExperiment}</p></div>}
+            </section>
+          )}
+          {activeRun.repositoryEvidence && (
+            <div className={`repository-evidence evidence-${activeRun.repositoryEvidence.status}`}>
+              <span>{t.repositoryEvidence}</span>
+              <p>{activeRun.repositoryEvidence.status === "verified" ? t.evidenceVerified : t.evidenceUnavailable}
+                {activeRun.repositoryEvidence.full_name ? ` · ${activeRun.repositoryEvidence.full_name}` : ""}
+                {activeRun.repositoryEvidence.stars !== undefined ? ` · ★ ${activeRun.repositoryEvidence.stars.toLocaleString()}` : ""}
+                {activeRun.repositoryEvidence.language ? ` · ${activeRun.repositoryEvidence.language}` : ""}
+                {activeRun.repositoryEvidence.license ? ` · ${activeRun.repositoryEvidence.license}` : ""}
+              </p>
+            </div>
+          )}
+          {activeRun.assessmentKind === "AGENT_AUDIT" && (
+            <section className="agent-audit-card">
+              <div><h2>{t.reasoningGaps}</h2><ul>{(activeRun.reasoningGaps || []).map((item) => <li key={item}>{item}</li>)}</ul></div>
+              <div><h2>{t.adversarialTests}</h2><ol>{(activeRun.adversarialTests || []).map((item) => <li key={item}>{item}</li>)}</ol></div>
+              {activeRun.agentImprovement && <div className="agent-improvement"><h2>{t.agentImprovement}</h2><p>{activeRun.agentImprovement}</p></div>}
+            </section>
+          )}
           <div className="decision-topline">
-            <div className="probability-wrap"><div className="probability">{activeRun.probability}<sup>%</sup></div><span>{t.successProbability}</span></div>
+            <div className="probability-wrap"><div className="probability">{activeRun.probability}<sup>%</sup></div><span>{activeRun.assessmentKind === "PROJECT_OPPORTUNITY" ? t.executionProbability : t.successProbability}</span></div>
             <div className="route-badge"><span>{t.route}</span><strong>{activeRun.route}</strong></div>
           </div>
           <div className="confidence-track" aria-label={`${activeRun.probability}%`}><span style={{ width: `${activeRun.probability}%` }} /></div>

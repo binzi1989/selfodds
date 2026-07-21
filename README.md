@@ -19,6 +19,10 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 
 - 默认中文界面，可一键切换英文。
 - 服务端 Preflight Agent，支持 DeepSeek V4 与 OpenAI 双提供商自动路由。
+- 三种评估模式：项目机会、任务执行、用户 Agent 审计。
+- GitHub URL 自动研究：读取仓库元数据、README、根目录结构、活跃度、语言与许可证，再把证据交给模型。
+- 项目模式严格区分“机会分”和“最小实验执行成功率”，避免把热度、价值和可执行性混成一个数字。
+- Agent 审计模式检查用户 Agent 的显式提示词、计划或输出，生成推理缺口、对抗测试、验证计划和改进指令。
 - 四阶段决策闭环：`SENSE → CHALLENGE → DECIDE → GUARD`。
 - 先计算确定性的外部视角风险信号，再由模型挑战假设，最后由守门器阻止过度乐观的自动执行。
 - 严格结构化输出：目标复述、概率、证据质量、风险、路由、缺失上下文、前置条件、失败模式、验证步骤和中止条件。
@@ -51,6 +55,9 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 
 OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=gpt-5.6-terra
+
+# 可选：提高 GitHub API 配额并支持可访问的私有仓库
+GITHUB_TOKEN=
 ```
 
 `auto` 默认按 DeepSeek → OpenAI → 本地规则的顺序路由。也可把 `AI_PROVIDER` 设置为 `openai`，让 OpenAI 优先。不要把真实密钥提交到 Git；只有占位的 `.env.example` 会进入版本控制。
@@ -65,7 +72,9 @@ npm run lint
 ## 工作原理
 
 ```text
-任务说明
+项目 / 任务 / 用户 Agent 材料
+   ↓
+GitHub Evidence：元数据 + README + 根目录结构
    ↓
 SENSE：外部视角基准 + 确定性风险信号
    ↓
@@ -99,9 +108,12 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 {
   "task": "修复支付回调重复处理并增加幂等性测试",
   "repository": "github.com/acme/payments-api",
-  "language": "zh"
+  "language": "zh",
+  "mode": "task"
 }
 ```
+
+`mode` 可选 `project`、`task`、`agent` 或 `auto`。项目模式返回机会评分量表和推荐最小实验；任务模式预测执行成功率；Agent 模式审计用户提供的 Agent 提示词、计划或输出。
 
 密钥只在服务端读取，浏览器不会接触 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`。
 
@@ -124,7 +136,10 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 - [x] 确定性风险信号与服务端路由守门器
 - [x] 本地降级与结果来源标记
 - [x] 预测账本与 Brier Score
-- [ ] 接入 GitHub Issue 与仓库元数据
+- [x] 自动读取 GitHub 仓库元数据、README 与根目录证据
+- [x] 项目机会 / 任务执行 / Agent 审计三模式
+- [ ] 从 weekly-rank 自动批量导入候选项目
+- [ ] 接入 GitHub Issue 与 PR 证据
 - [ ] 接入真实 Coding Agent Runner
 - [ ] 使用测试、构建和 Diff 自动结算
 - [ ] D1 持久化与团队排行榜

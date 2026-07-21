@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import { fetchRepositoryEvidence, parseGitHubRepository } from "../lib/github-evidence.ts";
 
 async function fetchApp(path = "/", init = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -23,6 +24,9 @@ test("server-renders the bilingual SelfOdds product shell", async () => {
   assert.match(html, /运行 PREFLIGHT/);
   assert.match(html, /真实结果账本/);
   assert.match(html, /AGENT 决策闭环/);
+  assert.match(html, /项目机会/);
+  assert.match(html, /任务执行/);
+  assert.match(html, /Agent 审计/);
   assert.match(html, /缺失上下文/);
   assert.match(html, /中止条件/);
   assert.match(html, /中文/);
@@ -46,6 +50,13 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
   let capturedBody = null;
   const modelAssessment = {
     goal_summary: "安全地完成支付数据库迁移并验证回滚能力",
+    assessment_kind: "TASK_FEASIBILITY",
+    opportunity_score: null,
+    rubric_scores: null,
+    recommended_experiment: null,
+    reasoning_gaps: [],
+    adversarial_tests: [],
+    agent_improvement: null,
     success_probability: 90,
     confidence_quality: "HIGH",
     risk: "LOW",
@@ -108,8 +119,9 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       task: "执行支付数据库 migration，并增加回滚测试",
-      repository: "github.com/acme/payments-api",
+      repository: "",
       language: "zh",
+      mode: "task",
     }),
   }));
   const payload = await result.json();
@@ -122,4 +134,40 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
   assert.ok(payload.assessment.guardrails_applied.length > 0);
   assert.equal(capturedBody.model, "deepseek-v4-flash");
   assert.deepEqual(capturedBody.response_format, { type: "json_object" });
+});
+
+test("GitHub evidence is fetched and normalized before assessment", async () => {
+  assert.deepEqual(parseGitHubRepository("https://github.com/OpenCut-app/OpenCut"), {
+    owner: "OpenCut-app",
+    repo: "OpenCut",
+    fullName: "OpenCut-app/OpenCut",
+  });
+
+  const fakeFetch = async (url) => {
+    if (url.endsWith("/readme")) return new Response("# OpenCut\nA focused README", { status: 200 });
+    if (url.endsWith("/contents")) return Response.json([{ name: "package.json", type: "file" }, { name: "apps", type: "dir" }]);
+    return Response.json({
+      full_name: "OpenCut-app/OpenCut",
+      html_url: "https://github.com/OpenCut-app/OpenCut",
+      description: "Open source video editor",
+      stargazers_count: 75348,
+      forks_count: 5000,
+      open_issues_count: 120,
+      language: "TypeScript",
+      topics: ["video-editor"],
+      license: { spdx_id: "MIT" },
+      created_at: "2025-06-22T00:00:00Z",
+      pushed_at: "2026-07-20T00:00:00Z",
+      archived: false,
+      fork: false,
+      default_branch: "main",
+    });
+  };
+
+  const evidence = await fetchRepositoryEvidence("github.com/OpenCut-app/OpenCut", fakeFetch);
+  assert.equal(evidence.status, "verified");
+  assert.equal(evidence.stars, 75348);
+  assert.equal(evidence.language, "TypeScript");
+  assert.deepEqual(evidence.root_files, ["file:package.json", "dir:apps"]);
+  assert.match(evidence.readme_excerpt, /focused README/);
 });

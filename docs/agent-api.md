@@ -14,6 +14,7 @@ Content-Type: application/json
 | `task` | string | 是 | 8–6000 字符的任务说明 |
 | `repository` | string | 否 | 仓库 URL、名称或其他上下文 |
 | `language` | `zh` / `en` | 否 | 输出语言，默认中文 |
+| `mode` | `auto` / `project` / `task` / `agent` | 否 | 项目机会、任务执行或用户 Agent 审计；默认自动识别 |
 
 ## Success response
 
@@ -23,10 +24,17 @@ Content-Type: application/json
   "source": "agent",
   "provider": "deepseek",
   "model": "deepseek-v4-flash",
-  "agent_version": "preflight-v2",
+  "agent_version": "research-preflight-v3",
   "latency_ms": 1280,
   "assessment": {
     "goal_summary": "修复支付回调幂等性并用并发测试证明",
+    "assessment_kind": "TASK_FEASIBILITY",
+    "opportunity_score": null,
+    "rubric_scores": null,
+    "recommended_experiment": null,
+    "reasoning_gaps": [],
+    "adversarial_tests": [],
+    "agent_improvement": null,
     "success_probability": 63,
     "confidence_quality": "MEDIUM",
     "risk": "HIGH",
@@ -46,7 +54,15 @@ Content-Type: application/json
     "stages": ["SENSE", "CHALLENGE", "DECIDE", "GUARD"],
     "outside_view_prior": 55,
     "risk_signals": ["可能涉及不可逆的数据或状态变更"],
-    "attempted_providers": ["deepseek"]
+    "attempted_providers": ["deepseek"],
+    "assessment_mode": "task",
+    "repository_evidence": {
+      "status": "verified",
+      "full_name": "acme/payments-api",
+      "stars": 2400,
+      "language": "TypeScript",
+      "license": "MIT"
+    }
   },
   "usage": {
     "input_tokens": 0,
@@ -73,8 +89,11 @@ DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-flash
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.6-terra
+GITHUB_TOKEN=
 ```
 
 `auto` 优先使用 DeepSeek，失败后尝试 OpenAI；两者都不可用时，前端使用明确标记的本地确定性规则。`AI_PROVIDER=openai` 会交换两个云端提供商的优先级。
+
+`GITHUB_TOKEN` 是可选项。公开仓库可匿名读取；配置后可以提高 API 配额，并读取该 Token 获准访问的仓库。Token 只应具有只读仓库内容权限。
 
 生产环境应通过托管平台的 Secret 管理功能配置密钥，不要将密钥写入源码、客户端变量或 Git 历史。
