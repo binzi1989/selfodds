@@ -35,6 +35,19 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 - 本机预测账本、PASS/FAIL 结算、Brier Score 和校准分。
 - 响应式界面和中英文文案。
 
+## 最近更新
+
+### 2026-07-21 · DeepSeek 稳定性与模式化校验
+
+- 修复任务执行和 Agent 审计因 `evidence_ledger: null` 或非法条目而整次降级的问题。
+- 服务端现在以请求中的评估模式为准，模型不能误改 `PROJECT_OPPORTUNITY`、`TASK_FEASIBILITY` 或 `AGENT_AUDIT`。
+- 在严格 Schema 校验前执行有限、可解释的字段标准化；非项目模式只保留合法的 `USER_INPUT` 证据，不伪造仓库事实。
+- DeepSeek 输出预算从 3200 提升到 5000 tokens，请求超时从 45 秒提升到 75 秒，降低长结构化结果被截断的概率。
+- 前端可区分鉴权失败、限流、超时和输出协议错误，不再把所有失败都显示成同一句提示。
+- 已用真实 DeepSeek 请求验证项目机会、任务执行和 Agent 审计三种模式。
+
+完整版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 快速开始
 
 ### 环境要求
@@ -145,6 +158,7 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 - [x] 项目机会 / 任务执行 / Agent 审计三模式
 - [x] 公开评分标准、证据账本与精准需求分析
 - [x] D1 预测存储与 7 天 GitHub 自动结算
+- [x] DeepSeek 长输出修复与三模式 Schema 稳定化
 - [ ] 从 weekly-rank 自动批量导入候选项目
 - [ ] 接入 GitHub Issue 与 PR 证据
 - [ ] 接入真实 Coding Agent Runner
