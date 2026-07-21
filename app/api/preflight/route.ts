@@ -319,11 +319,27 @@ function boundedNumber(value: unknown, minimum: number, maximum: number, fallbac
   return Number.isFinite(numeric) ? Math.max(minimum, Math.min(maximum, Math.round(numeric))) : fallback;
 }
 
-function parseJsonAssessment(content: string | null, fallbackSuccessProbability: number) {
+function normalizeEvidenceLedger(value: unknown, mode: AssessmentMode) {
+  if (!Array.isArray(value)) return [];
+  const statuses = new Set(["OBSERVED", "INFERRED", "UNKNOWN"]);
+  const sources = new Set(["REPO_METADATA", "README", "REPO_STRUCTURE", "USER_INPUT", "NONE"]);
+  const directions = new Set(["POSITIVE", "NEGATIVE", "NEUTRAL"]);
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    .filter((item) => typeof item.claim === "string"
+      && item.claim.trim().length >= 3
+      && statuses.has(String(item.status))
+      && sources.has(String(item.source))
+      && directions.has(String(item.direction)))
+    .filter((item) => mode === "project" || item.source === "USER_INPUT")
+    .slice(0, 12)
+    .map((item) => ({ ...item, claim: String(item.claim).trim().slice(0, 220) }));
+}
+
+export function parseJsonAssessment(content: string | null, fallbackSuccessProbability: number, mode: AssessmentMode) {
   if (!content) throw new Error("EMPTY_MODEL_RESULT");
   const cleaned = content.trim().replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
   const value = JSON.parse(cleaned) as Record<string, unknown>;
-  const kind = value.assessment_kind;
   const rubric = value.rubric_scores && typeof value.rubric_scores === "object"
     ? value.rubric_scores as Record<string, unknown>
     : null;
@@ -345,9 +361,17 @@ function parseJsonAssessment(content: string | null, fallbackSuccessProbability:
     adversarial_tests: [],
     agent_improvement: null,
     ...value,
-    assessment_kind: kind === "PROJECT_OPPORTUNITY" || kind === "AGENT_AUDIT" ? kind : "TASK_FEASIBILITY",
+    assessment_kind: mode === "project" ? "PROJECT_OPPORTUNITY" : mode === "agent" ? "AGENT_AUDIT" : "TASK_FEASIBILITY",
+    opportunity_score: mode === "project" ? value.opportunity_score : null,
+    rubric_scores: mode === "project" ? value.rubric_scores : null,
+    recommended_experiment: mode === "project" ? value.recommended_experiment : null,
+    demand_analysis: mode === "project" ? value.demand_analysis : null,
+    evidence_ledger: normalizeEvidenceLedger(value.evidence_ledger, mode),
+    reasoning_gaps: mode === "agent" && Array.isArray(value.reasoning_gaps) ? value.reasoning_gaps : [],
+    adversarial_tests: mode === "agent" && Array.isArray(value.adversarial_tests) ? value.adversarial_tests : [],
+    agent_improvement: mode === "agent" && typeof value.agent_improvement === "string" ? value.agent_improvement : null,
     success_probability: boundedNumber(value.success_probability, 5, 95, derivedSuccess),
-    trend_probability: kind === "PROJECT_OPPORTUNITY"
+    trend_probability: mode === "project"
       ? boundedNumber(value.trend_probability, 5, 95, boundedNumber(rubric?.momentum, 5, 95, 50))
       : null,
     estimated_minutes: boundedNumber(value.estimated_minutes, 1, 1440, 30),
@@ -382,7 +406,7 @@ async function assessWithDeepSeek(
   });
   const usage = response.usage;
   return {
-    assessment: parseJsonAssessment(response.choices[0]?.message?.content ?? null, outsideViewPrior(signals)),
+    assessment: parseJsonAssessment(response.choices[0]?.message?.content ?? null, outsideViewPrior(signals), mode),
     provider: "deepseek",
     model,
     usage: usage ? {

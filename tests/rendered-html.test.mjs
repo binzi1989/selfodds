@@ -59,6 +59,7 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
     reasoning_gaps: [],
     adversarial_tests: [],
     agent_improvement: null,
+    evidence_ledger: null,
     // DeepSeek sometimes returns null for this cross-mode field. The route must
     // repair it from the deterministic outside-view prior instead of discarding
     // the otherwise valid assessment.
@@ -137,9 +138,49 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
   assert.equal(payload.assessment.route, "REVIEW");
   assert.equal(payload.assessment.risk, "MEDIUM");
   assert.equal(typeof payload.assessment.success_probability, "number");
+  assert.deepEqual(payload.assessment.evidence_ledger, []);
   assert.ok(payload.assessment.guardrails_applied.length > 0);
   assert.equal(capturedBody.model, "deepseek-v4-flash");
   assert.deepEqual(capturedBody.response_format, { type: "json_object" });
+});
+
+test("non-project modes normalize nullable evidence ledgers before strict validation", async () => {
+  const routeUrl = new URL("../app/api/preflight/route.ts", import.meta.url);
+  routeUrl.searchParams.set("ledger-test", `${Date.now()}-${Math.random()}`);
+  const { parseJsonAssessment } = await import(routeUrl.href);
+  const base = {
+    goal_summary: "审计用户编写的 Agent 指令并检查验证与停止条件",
+    assessment_kind: "AGENT_AUDIT",
+    opportunity_score: null,
+    rubric_scores: null,
+    recommended_experiment: null,
+    trend_probability: null,
+    demand_analysis: null,
+    evidence_ledger: null,
+    reasoning_gaps: ["没有定义失败后的恢复策略"],
+    adversarial_tests: ["模拟测试命令不可用"],
+    agent_improvement: "先验证输入和工具，再执行任务，并在验证失败时立即停止。",
+    success_probability: 70,
+    confidence_quality: "MEDIUM",
+    risk: "MEDIUM",
+    route: "REVIEW",
+    estimated_minutes: 30,
+    estimated_cost_usd: 1,
+    missing_context: [],
+    preconditions: ["确认仓库可访问"],
+    failure_modes: ["测试环境可能不可用"],
+    verification_steps: ["运行测试", "检查最终差异"],
+    abort_conditions: ["测试失败时停止"],
+    policy: "只在隔离环境执行并保留审查步骤。",
+    assumptions: [],
+  };
+
+  const agent = parseJsonAssessment(JSON.stringify(base), 60, "agent");
+  const task = parseJsonAssessment(JSON.stringify({ ...base, assessment_kind: "TASK_FEASIBILITY" }), 60, "task");
+  assert.deepEqual(agent.evidence_ledger, []);
+  assert.deepEqual(task.evidence_ledger, []);
+  assert.equal(agent.assessment_kind, "AGENT_AUDIT");
+  assert.equal(task.assessment_kind, "TASK_FEASIBILITY");
 });
 
 test("GitHub evidence is fetched and normalized before assessment", async () => {
