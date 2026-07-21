@@ -104,3 +104,35 @@ GITHUB_TOKEN=
 `GITHUB_TOKEN` 是可选项。公开仓库可匿名读取；配置后可以提高 API 配额，并读取该 Token 获准访问的仓库。Token 只应具有只读仓库内容权限。
 
 生产环境应通过托管平台的 Secret 管理功能配置密钥，不要将密钥写入源码、客户端变量或 Git 历史。
+
+## Runner API
+
+任务模式成功预测后，响应会包含：
+
+```json
+{
+  "runner_record": {
+    "id": "uuid",
+    "status": "predicted",
+    "created_at": 1784620192669
+  },
+  "probability_calibration": {
+    "raw": 75,
+    "calibrated": 75,
+    "sample_size": 1,
+    "method": "identity_insufficient_data"
+  }
+}
+```
+
+`GET /api/runner?id=<uuid>` 读取运行状态。Runner 使用 `POST /api/runner` 的 `start` 和 `settle` 动作回写执行事实，并通过 `x-selfodds-runner-token` 验证 `RUNNER_SHARED_SECRET`。
+
+## Intelligence API
+
+`GET /api/intelligence` 返回：
+
+- 模型与 Runner 排行榜；
+- 预测概率和实际成功率分桶；
+- 失败模式计数；
+- 失败类型到任务模式、模型的关系图；
+- 最近真实运行记录。

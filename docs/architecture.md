@@ -16,7 +16,7 @@ Browser UI
 POST /api/preflight
           │
           ├─ 请求校验与服务端密钥边界
-          ├─ GitHub Evidence：元数据、README、根目录结构
+          ├─ GitHub Evidence：元数据、README、根目录、Issue 与 PR
           ├─ Evidence Ledger：OBSERVED / INFERRED / UNKNOWN
           ├─ SENSE：确定性风险信号与外部视角先验
           ├─ CHALLENGE / DECIDE：DeepSeek V4 或 OpenAI
@@ -56,7 +56,7 @@ Decision Token
 
 项目机会分是独立指标，由需求、趋势、差异化、可构建性、传播性和证据质量加权得出。它不参与自治路由，也不能用 Star 数量直接替代。Agent 审计只检查用户提供的显式提示词、计划和输出，不索取或伪造隐藏思维链。
 
-只有 7 天趋势概率进入自动校准。预测快照与到期时间持久化到 D1；每次访问校准接口时，系统自动结算到期记录并更新 Brier Score。机会指数不会被伪装成可校准概率。
+7 天趋势概率使用 GitHub 后续状态自动结算；任务成功概率使用真实 Runner 结果结算。两类预测分别保存并计算 Brier Score。任务模式在同模型真实样本达到 5 条后启用经验贝叶斯校准；机会指数不会被伪装成可校准概率。
 
 ## 安全边界
 
@@ -66,9 +66,9 @@ Decision Token
 - 服务端守门器只允许模型收紧风险，不能绕过概率阈值、高影响任务或上下文缺口。
 - 只有 GitHub Evidence 返回 `verified` 时，Agent 才能声称读取了仓库证据；否则 URL 仍被视为标签。
 - 本地降级结果在 UI 和数据记录中有独立来源标记。
-- 当前系统只做评估，不执行外部写入或生产操作。
+- 云端系统不执行任意仓库代码；本地 Runner 只执行操作者显式传入的测试与构建命令。
 
-## 下一阶段：Runner 闭环
+## Runner 闭环
 
 ```text
 Decision Token
@@ -86,6 +86,10 @@ Deterministic Verifier
    └─ policy checks
    ↓
 Resolved Outcome Store
+   ├─ D1 agent_runs
+   ├─ model / runner leaderboard
+   ├─ calibration bins
+   └─ failure knowledge graph
 ```
 
 ## 数据演进

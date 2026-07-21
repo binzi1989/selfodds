@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 import { fetchRepositoryEvidence, parseGitHubRepository } from "../lib/github-evidence.ts";
 import { calculateOpportunityScore, opportunityGrade, predictionInterval, trendStarThreshold } from "../lib/evaluation-standard.ts";
+import { empiricalBayesCalibration } from "../lib/run-calibration.ts";
 
 async function fetchApp(path = "/", init = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -31,6 +32,7 @@ test("server-renders the bilingual SelfOdds product shell", async () => {
   assert.match(html, /评判标准/);
   assert.match(html, /缺失上下文/);
   assert.match(html, /中止条件/);
+  assert.match(html, /运行智能/);
   assert.match(html, /中文/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
@@ -193,6 +195,10 @@ test("GitHub evidence is fetched and normalized before assessment", async () => 
   const fakeFetch = async (url) => {
     if (url.endsWith("/readme")) return new Response("# OpenCut\nA focused README", { status: 200 });
     if (url.endsWith("/contents")) return Response.json([{ name: "package.json", type: "file" }, { name: "apps", type: "dir" }]);
+    if (url.includes("/issues?")) return Response.json([
+      { number: 12, title: "Export stalls", state: "open", comments: 4, labels: [{ name: "bug" }], updated_at: "2026-07-20T00:00:00Z" },
+      { number: 13, title: "Improve renderer", state: "closed", comments: 2, labels: [], pull_request: { url: "https://api.github.com/pulls/13" }, updated_at: "2026-07-19T00:00:00Z" },
+    ]);
     return Response.json({
       full_name: "OpenCut-app/OpenCut",
       html_url: "https://github.com/OpenCut-app/OpenCut",
@@ -217,6 +223,8 @@ test("GitHub evidence is fetched and normalized before assessment", async () => 
   assert.equal(evidence.language, "TypeScript");
   assert.deepEqual(evidence.root_files, ["file:package.json", "dir:apps"]);
   assert.match(evidence.readme_excerpt, /focused README/);
+  assert.deepEqual(evidence.issue_signals, { sampled: 2, issues: 1, pull_requests: 1, open: 1, closed: 1, labeled: 1 });
+  assert.equal(evidence.issues_sample[0].title, "Export stalls");
 });
 
 test("opportunity scoring and calibration thresholds are deterministic", () => {
@@ -234,6 +242,25 @@ test("opportunity scoring and calibration thresholds are deterministic", () => {
   assert.deepEqual(predictionInterval(70, "MEDIUM"), { lower: 55, upper: 85 });
 });
 
+test("real-run probability calibration waits for enough evidence and then shrinks empirically", () => {
+  assert.deepEqual(empiricalBayesCalibration(80, [{ success_probability: 80, outcome: 0 }]), {
+    raw: 80,
+    calibrated: 80,
+    sample_size: 1,
+    method: "identity_insufficient_data",
+  });
+  const calibrated = empiricalBayesCalibration(80, [
+    { success_probability: 75, outcome: 1 },
+    { success_probability: 80, outcome: 0 },
+    { success_probability: 82, outcome: 0 },
+    { success_probability: 85, outcome: 1 },
+    { success_probability: 78, outcome: 0 },
+  ]);
+  assert.equal(calibrated.method, "empirical_bayes_v1");
+  assert.equal(calibrated.sample_size, 5);
+  assert.equal(calibrated.calibrated, 60);
+});
+
 test("calibration API degrades honestly when durable storage is unavailable", async () => {
   const response = await fetchApp("/api/calibration");
   assert.equal(response.status, 200);
@@ -241,4 +268,16 @@ test("calibration API degrades honestly when durable storage is unavailable", as
   assert.equal(payload.ok, true);
   assert.equal(payload.storage_available, false);
   assert.equal(payload.resolved, 0);
+});
+
+test("runner intelligence API degrades honestly when D1 is unavailable", async () => {
+  const routeUrl = new URL("../app/api/intelligence/route.ts", import.meta.url);
+  routeUrl.searchParams.set("test", `${Date.now()}-${Math.random()}`);
+  const { GET } = await import(routeUrl.href);
+  const response = await GET();
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(payload.storage_available, false);
+  assert.deepEqual(payload.leaderboard, { models: [], runners: [] });
+  assert.deepEqual(payload.knowledge_graph, { nodes: [], edges: [] });
 });

@@ -48,7 +48,7 @@ const AssessmentSchema = z.object({
   evidence_ledger: z.array(z.object({
     claim: z.string().min(3).max(220),
     status: z.enum(["OBSERVED", "INFERRED", "UNKNOWN"]),
-    source: z.enum(["REPO_METADATA", "README", "REPO_STRUCTURE", "USER_INPUT", "NONE"]),
+    source: z.enum(["REPO_METADATA", "README", "REPO_STRUCTURE", "GITHUB_ISSUES", "USER_INPUT", "NONE"]),
     direction: z.enum(["POSITIVE", "NEGATIVE", "NEUTRAL"]),
   })).max(12),
   reasoning_gaps: z.array(z.string().min(3).max(220)).max(6),
@@ -99,7 +99,7 @@ Run this decision loop internally:
 3. DECIDE: estimate P(the task is completed correctly, within scope, and passes verification), then choose a route.
 4. GUARD: define preconditions, verification, and explicit abort conditions before execution.
 
-Do not execute the task. Repository evidence, when present, was retrieved from GitHub and may be used as evidence. A URL without verified evidence is only a label.
+Do not execute the task. Repository evidence, when present, was retrieved from GitHub and may include metadata, README, structure, recent Issues and pull requests. A URL without verified evidence is only a label.
 
 Keep two questions separate:
 - PROJECT_OPPORTUNITY: Is this project/problem a promising source for a differentiated experiment? Return an opportunity score and the six rubric scores. Popularity alone is not product demand.
@@ -137,7 +137,7 @@ const JSON_SHAPE = `Return one JSON object with exactly these fields:
   "recommended_experiment": "string or null",
   "trend_probability": 65,
   "demand_analysis": {"target_user":"string","core_problem":"string","current_alternative":"string","urgency":"LOW | MEDIUM | HIGH","demand_evidence":["string"],"counter_evidence":["string"],"unknowns":["string"],"falsifiable_hypothesis":"string"},
-  "evidence_ledger": [{"claim":"string","status":"OBSERVED | INFERRED | UNKNOWN","source":"REPO_METADATA | README | REPO_STRUCTURE | USER_INPUT | NONE","direction":"POSITIVE | NEGATIVE | NEUTRAL"}],
+  "evidence_ledger": [{"claim":"string","status":"OBSERVED | INFERRED | UNKNOWN","source":"REPO_METADATA | README | REPO_STRUCTURE | GITHUB_ISSUES | USER_INPUT | NONE","direction":"POSITIVE | NEGATIVE | NEUTRAL"}],
   "reasoning_gaps": ["string"],
   "adversarial_tests": ["string"],
   "agent_improvement": "string or null",
@@ -322,7 +322,7 @@ function boundedNumber(value: unknown, minimum: number, maximum: number, fallbac
 function normalizeEvidenceLedger(value: unknown, mode: AssessmentMode) {
   if (!Array.isArray(value)) return [];
   const statuses = new Set(["OBSERVED", "INFERRED", "UNKNOWN"]);
-  const sources = new Set(["REPO_METADATA", "README", "REPO_STRUCTURE", "USER_INPUT", "NONE"]);
+  const sources = new Set(["REPO_METADATA", "README", "REPO_STRUCTURE", "GITHUB_ISSUES", "USER_INPUT", "NONE"]);
   const directions = new Set(["POSITIVE", "NEGATIVE", "NEUTRAL"]);
   return value
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
@@ -523,7 +523,17 @@ export async function POST(request: Request) {
       const result = provider === "deepseek"
         ? await assessWithDeepSeek(parsed.data.task, parsed.data.repository, parsed.data.language, signals, mode, repositoryEvidence)
         : await assessWithOpenAI(parsed.data.task, parsed.data.repository, parsed.data.language, signals, mode, repositoryEvidence);
-      const normalized = normalizeOpportunityScore(result.assessment, mode);
+      let normalized = normalizeOpportunityScore(result.assessment, mode);
+      let probabilityCalibration: { raw: number; calibrated: number; sample_size: number; method: string } | null = null;
+      if (mode === "task") {
+        try {
+          const { calibrateProbability } = await import("../../../db/runs.ts");
+          probabilityCalibration = await calibrateProbability(normalized.success_probability, mode, result.model);
+          normalized = { ...normalized, success_probability: probabilityCalibration.calibrated };
+        } catch (error) {
+          console.error("SelfOdds probability calibration unavailable", error instanceof Error ? error.message : "unknown error");
+        }
+      }
       const guarded = applyDecisionGuard(normalized, signals, parsed.data.language);
       const opportunityStandard = mode === "project" && guarded.opportunity_score !== null
         ? {
@@ -565,17 +575,38 @@ export async function POST(request: Request) {
           console.error("SelfOdds forecast persistence failed", error instanceof Error ? error.message : "unknown error");
         }
       }
+      let runnerRecord: { id: string; status: string; created_at: number } | null = null;
+      if (mode === "task") {
+        try {
+          const { createPredictedRun } = await import("../../../db/runs.ts");
+          runnerRecord = await createPredictedRun({
+            mode,
+            task: parsed.data.task,
+            repository: parsed.data.repository,
+            provider: result.provider,
+            model: result.model,
+            successProbability: guarded.success_probability,
+            route: guarded.route,
+            risk: guarded.risk,
+            assessment: guarded,
+          });
+        } catch (error) {
+          console.error("SelfOdds runner record persistence failed", error instanceof Error ? error.message : "unknown error");
+        }
+      }
       return Response.json({
         ok: true,
         source: "agent",
         provider: result.provider,
         model: result.model,
-        agent_version: "evidence-calibration-v4",
+        agent_version: "runner-intelligence-v5",
         latency_ms: Date.now() - startedAt,
         assessment: guarded,
         standard: opportunityStandard,
         calibration_forecast: forecast,
         calibration_record: calibrationRecord,
+        runner_record: runnerRecord,
+        probability_calibration: probabilityCalibration,
         trace: {
           stages: ["SENSE", "CHALLENGE", "DECIDE", "GUARD"],
           outside_view_prior: outsideViewPrior(signals),
@@ -587,10 +618,13 @@ export async function POST(request: Request) {
             full_name: repositoryEvidence.full_name,
             stars: repositoryEvidence.stars,
             forks: repositoryEvidence.forks,
+            open_issues: repositoryEvidence.open_issues,
             language: repositoryEvidence.language,
             license: repositoryEvidence.license,
             pushed_at: repositoryEvidence.pushed_at,
             root_files: repositoryEvidence.root_files,
+            issue_signals: repositoryEvidence.issue_signals,
+            target_issue: repositoryEvidence.target_issue,
             warning: repositoryEvidence.warning,
           },
         },

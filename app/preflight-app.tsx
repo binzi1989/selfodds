@@ -34,6 +34,9 @@ type Run = {
   guardrails?: string[];
   riskSignals?: string[];
   stages?: string[];
+  runnerId?: string | null;
+  runnerStatus?: string | null;
+  probabilityCalibration?: { raw: number; calibrated: number; sample_size: number; method: string } | null;
   assessmentKind?: "PROJECT_OPPORTUNITY" | "TASK_FEASIBILITY" | "AGENT_AUDIT";
   opportunityScore?: number | null;
   rubricScores?: Record<"demand" | "momentum" | "differentiation" | "buildability" | "distribution" | "evidence", number> | null;
@@ -52,7 +55,7 @@ type Run = {
   evidenceLedger?: Array<{
     claim: string;
     status: "OBSERVED" | "INFERRED" | "UNKNOWN";
-    source: "REPO_METADATA" | "README" | "REPO_STRUCTURE" | "USER_INPUT" | "NONE";
+    source: "REPO_METADATA" | "README" | "REPO_STRUCTURE" | "GITHUB_ISSUES" | "USER_INPUT" | "NONE";
     direction: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
   }>;
   standard?: {
@@ -82,6 +85,8 @@ type Run = {
     language?: string;
     license?: string;
     pushed_at?: string;
+    issue_signals?: { sampled: number; issues: number; pull_requests: number; open: number; closed: number; labeled: number };
+    target_issue?: { number: number; kind: "issue" | "pull_request"; state: "open" | "closed"; title: string; comments: number };
   };
 };
 
@@ -122,6 +127,8 @@ type AgentResponse = {
   standard?: Run["standard"];
   calibration_forecast?: Run["calibrationForecast"];
   calibration_record?: { id: string; due_at: number } | null;
+  runner_record?: { id: string; status: string; created_at: number } | null;
+  probability_calibration?: Run["probabilityCalibration"];
   trace?: {
     stages: string[];
     outside_view_prior: number;
@@ -142,6 +149,33 @@ type CalibrationSummary = {
   actual_success_rate: number | null;
   brier_score: number | null;
   calibration_score: number | null;
+};
+
+type IntelligenceSummary = {
+  storage_available?: boolean;
+  total: number;
+  pending: number;
+  resolved: number;
+  leaderboard: {
+    models: Array<{ name: string; resolved: number; success_rate: number; brier: number; calibration_score: number }>;
+    runners: Array<{ name: string; resolved: number; success_rate: number; brier: number; calibration_score: number }>;
+  };
+  calibration_bins: Array<{ bucket: string; mean_forecast: number; actual_rate: number; count: number }>;
+  failure_patterns: Array<{ code: string; count: number }>;
+  knowledge_graph: {
+    nodes: Array<{ id: string; type: string; label: string; count?: number }>;
+    edges: Array<{ source: string; target: string; relation: string; count: number }>;
+  };
+};
+
+const emptyIntelligence: IntelligenceSummary = {
+  total: 0,
+  pending: 0,
+  resolved: 0,
+  leaderboard: { models: [], runners: [] },
+  calibration_bins: [],
+  failure_patterns: [],
+  knowledge_graph: { nodes: [], edges: [] },
 };
 
 const STORAGE_KEY = "selfodds-runs-v2";
@@ -239,6 +273,19 @@ const copy = {
     ledgerTitle: "让自信接受结果检验。",
     runs: "运行记录",
     benchmark: "评判标准",
+    intelligence: "运行智能",
+    runnerReady: "RUNNER 已就绪",
+    runnerCommand: "在目标仓库运行",
+    issueSignals: "ISSUE / PR 信号",
+    teamLeaderboard: "团队与模型排行榜",
+    calibrationBins: "真实概率校准",
+    failureKnowledge: "失败模式知识图谱",
+    noResolvedData: "等待 Runner 完成首批真实任务后生成",
+    resolved: "已结算",
+    successRate: "成功率",
+    graphRelation: "观察关系",
+    probabilityCalibration: "概率校准",
+    insufficientSamples: "真实样本不足，暂不调整模型概率",
     resolvedRuns: "已结算任务",
     actualSuccess: "实际成功率",
     calibrationMetric: "校准度",
@@ -360,6 +407,19 @@ const copy = {
     ledgerTitle: "Confidence meets consequence.",
     runs: "RUNS",
     benchmark: "STANDARD",
+    intelligence: "RUN INTELLIGENCE",
+    runnerReady: "RUNNER READY",
+    runnerCommand: "RUN IN THE TARGET REPOSITORY",
+    issueSignals: "ISSUE / PR SIGNALS",
+    teamLeaderboard: "TEAM & MODEL LEADERBOARD",
+    calibrationBins: "EMPIRICAL CALIBRATION",
+    failureKnowledge: "FAILURE KNOWLEDGE GRAPH",
+    noResolvedData: "Generated after the Runner settles real tasks",
+    resolved: "RESOLVED",
+    successRate: "SUCCESS RATE",
+    graphRelation: "OBSERVED RELATION",
+    probabilityCalibration: "PROBABILITY CALIBRATION",
+    insufficientSamples: "Not enough settled runs; model probability remains unchanged",
     resolvedRuns: "RESOLVED RUNS",
     actualSuccess: "ACTUAL SUCCESS",
     calibrationMetric: "CALIBRATION",
@@ -618,6 +678,9 @@ function mapAgentAssessment(response: AgentResponse, task: string, repo: string,
     standard: response.standard || null,
     calibrationForecast: response.calibration_forecast || null,
     calibrationDueAt: response.calibration_record?.due_at || null,
+    runnerId: response.runner_record?.id || null,
+    runnerStatus: response.runner_record?.status || null,
+    probabilityCalibration: response.probability_calibration || null,
     reasoningGaps: assessment.reasoning_gaps,
     adversarialTests: assessment.adversarial_tests,
     agentImprovement: assessment.agent_improvement,
@@ -633,9 +696,10 @@ export function PreflightApp() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [activeRun, setActiveRun] = useState<Run>(() => sampleRuns[0]);
   const [analyzing, setAnalyzing] = useState(false);
-  const [activeView, setActiveView] = useState<"runs" | "benchmark">("runs");
+  const [activeView, setActiveView] = useState<"runs" | "benchmark" | "intelligence">("runs");
   const [notice, setNotice] = useState("");
   const [calibration, setCalibration] = useState<CalibrationSummary>({ total: 0, pending: 0, resolved: 0, actual_success_rate: null, brier_score: null, calibration_score: null });
+  const [intelligence, setIntelligence] = useState<IntelligenceSummary>(emptyIntelligence);
   const t = copy[language];
 
   useEffect(() => {
@@ -671,6 +735,15 @@ export function PreflightApp() {
     fetch("/api/calibration")
       .then((response) => response.json())
       .then((value: CalibrationSummary) => { if (!cancelled) setCalibration(value); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [runs.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/intelligence")
+      .then((response) => response.json())
+      .then((value: IntelligenceSummary) => { if (!cancelled) setIntelligence(value); })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [runs.length]);
@@ -798,6 +871,21 @@ export function PreflightApp() {
             <span>{t.decisionToken}</span><span className="sealed">{t.sealed} · {activeRun.createdAt}</span>
           </div>
           <div className="source-chip">{sourceLabel(activeRun)}</div>
+          {activeRun.runnerId && (
+            <div className="runner-ready">
+              <span>{t.runnerReady} · {activeRun.runnerId}</span>
+              <small>{t.runnerCommand}</small>
+              <code>npm run runner -- --run {activeRun.runnerId} --test &quot;npm test&quot; --build &quot;npm run build&quot;</code>
+            </div>
+          )}
+          {activeRun.probabilityCalibration && (
+            <div className="probability-calibration-note">
+              <span>{t.probabilityCalibration}</span>
+              <p>{activeRun.probabilityCalibration.method === "identity_insufficient_data"
+                ? `${t.insufficientSamples} · n=${activeRun.probabilityCalibration.sample_size}`
+                : `${activeRun.probabilityCalibration.raw}% → ${activeRun.probabilityCalibration.calibrated}% · n=${activeRun.probabilityCalibration.sample_size}`}</p>
+            </div>
+          )}
           <div className="agent-loop" aria-label={t.agentLoop}>
             <strong>{t.agentLoop}</strong>
             {(activeRun.stages || ["SENSE", "GUARD"]).map((stage, index, stages) => (
@@ -866,6 +954,12 @@ export function PreflightApp() {
                 {activeRun.repositoryEvidence.language ? ` · ${activeRun.repositoryEvidence.language}` : ""}
                 {activeRun.repositoryEvidence.license ? ` · ${activeRun.repositoryEvidence.license}` : ""}
               </p>
+              {activeRun.repositoryEvidence.issue_signals && (
+                <small>{t.issueSignals} · {activeRun.repositoryEvidence.issue_signals.issues} Issues · {activeRun.repositoryEvidence.issue_signals.pull_requests} PRs · {activeRun.repositoryEvidence.issue_signals.open} Open · {activeRun.repositoryEvidence.issue_signals.closed} Closed</small>
+              )}
+              {activeRun.repositoryEvidence.target_issue && (
+                <small>#{activeRun.repositoryEvidence.target_issue.number} · {activeRun.repositoryEvidence.target_issue.state.toUpperCase()} · {activeRun.repositoryEvidence.target_issue.title}</small>
+              )}
             </div>
           )}
           {activeRun.assessmentKind === "AGENT_AUDIT" && (
@@ -916,6 +1010,7 @@ export function PreflightApp() {
           <div className="view-tabs" role="tablist" aria-label="Ledger views">
             <button role="tab" aria-selected={activeView === "runs"} className={activeView === "runs" ? "active" : ""} onClick={() => setActiveView("runs")}>{t.runs}</button>
             <button role="tab" aria-selected={activeView === "benchmark"} className={activeView === "benchmark" ? "active" : ""} onClick={() => setActiveView("benchmark")}>{t.benchmark}</button>
+            <button role="tab" aria-selected={activeView === "intelligence"} className={activeView === "intelligence" ? "active" : ""} onClick={() => setActiveView("intelligence")}>{t.intelligence}</button>
           </div>
         </div>
         <div className="metric-strip">
@@ -937,6 +1032,8 @@ export function PreflightApp() {
                   {run.outcome === "pending" ? (
                     run.assessmentKind === "PROJECT_OPPORTUNITY"
                       ? <span className="auto-pending">AUTO · 7D</span>
+                      : run.runnerId
+                        ? <span className="auto-pending">RUNNER · READY</span>
                       : <div className="resolve-actions" aria-label={`Resolve ${run.task}`}>
                           <button onClick={() => resolveRun(run.id, "success")}>{t.pass}</button>
                           <button onClick={() => resolveRun(run.id, "failed")}>{t.fail}</button>
@@ -946,7 +1043,7 @@ export function PreflightApp() {
               </div>
             ))}
           </div>
-        ) : (
+        ) : activeView === "benchmark" ? (
           <div className="benchmark" role="tabpanel">
             <div className="benchmark-note">{t.scoreStandard} · SELFODDS-OPPORTUNITY-V1</div>
             {scoringWeights.map(([key, weight], index) => (
@@ -956,6 +1053,43 @@ export function PreflightApp() {
             ))}
             <div className="standard-thresholds"><span>A ≥ 80 · STRONG EXPERIMENT</span><span>B ≥ 65 · WORTH TESTING</span><span>C ≥ 50 · WEAK EVIDENCE</span><span>D &lt; 50 · PASS</span></div>
             <div className="anchor-scale"><span>{t.anchor0}</span><span>{t.anchor25}</span><span>{t.anchor50}</span><span>{t.anchor75}</span><span>{t.anchor100}</span></div>
+          </div>
+        ) : (
+          <div className="intelligence-panel" role="tabpanel">
+            <div className="intelligence-summary">
+              <div><span>{t.runs}</span><strong>{intelligence.total}</strong></div>
+              <div><span>{t.runnerReady}</span><strong>{intelligence.pending}</strong></div>
+              <div><span>{t.resolved}</span><strong>{intelligence.resolved}</strong></div>
+            </div>
+            {intelligence.resolved === 0 ? <p className="empty-intelligence">{t.noResolvedData}</p> : (
+              <>
+                <section className="intelligence-block">
+                  <h3>{t.teamLeaderboard}</h3>
+                  <div className="leaderboard-grid">
+                    {[...intelligence.leaderboard.models, ...intelligence.leaderboard.runners].slice(0, 10).map((entry) => (
+                      <div key={`${entry.name}-${entry.resolved}`}><strong>{entry.name}</strong><span>{entry.resolved} {t.resolved}</span><span>{entry.success_rate}% {t.successRate}</span><b>{entry.calibration_score}/100</b></div>
+                    ))}
+                  </div>
+                </section>
+                <section className="intelligence-block">
+                  <h3>{t.calibrationBins}</h3>
+                  <div className="calibration-bars">
+                    {intelligence.calibration_bins.map((bin) => (
+                      <div key={bin.bucket}><span>{bin.bucket}% · n={bin.count}</span><i style={{ width: `${bin.mean_forecast}%` }} /><b style={{ left: `${bin.actual_rate}%` }}>{bin.actual_rate}%</b></div>
+                    ))}
+                  </div>
+                </section>
+                <section className="intelligence-block knowledge-board">
+                  <h3>{t.failureKnowledge}</h3>
+                  <div className="knowledge-nodes">
+                    {intelligence.knowledge_graph.nodes.map((node) => <span className={`node-${node.type.toLowerCase()}`} key={node.id}>{node.label}{node.count ? ` · ${node.count}` : ""}</span>)}
+                  </div>
+                  <div className="knowledge-edges">
+                    {intelligence.knowledge_graph.edges.map((edge) => <p key={`${edge.source}-${edge.target}`}><code>{edge.source.replace("failure:", "")}</code> → <code>{edge.target}</code><span>{t.graphRelation} · {edge.count}</span></p>)}
+                  </div>
+                </section>
+              </>
+            )}
           </div>
         )}
       </section>

@@ -21,11 +21,15 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 - 服务端 Preflight Agent，支持 DeepSeek V4 与 OpenAI 双提供商自动路由。
 - 三种评估模式：项目机会、任务执行、用户 Agent 审计。
 - GitHub URL 自动研究：读取仓库元数据、README、根目录结构、活跃度、语言与许可证，再把证据交给模型。
+- GitHub Issue / PR 证据：采样最近更新的 Issue 与 PR、标签、开闭状态，并支持直接输入指定 Issue 链接。
 - 项目模式严格区分“机会分”和“最小实验执行成功率”，避免把热度、价值和可执行性混成一个数字。
 - 固定公开的评分权重、0/25/50/75/100 证据锚点和 A–D 等级，服务端确定性计算总分。
 - 精准需求分析：目标用户、核心问题、替代方案、紧迫度、正反证据、未知信息和可证伪假设。
 - 证据账本把每个重要结论标记为 `OBSERVED`、`INFERRED` 或 `UNKNOWN`。
 - 7 天 GitHub 趋势预测自动持久化并结算，自动计算真实成功率、Brier Score 和校准分。
+- 本地 Coding Agent Runner CLI：实际执行测试、构建与 Git Diff 检查，并把结果回写 D1 自动结算。
+- D1 运行智能：模型与 Runner 排行榜、真实概率分桶、Brier Score、失败类型和关系图谱。
+- 基于真实结算记录的经验贝叶斯概率校准器；少于 5 条同模型样本时保持原概率，避免小样本误校准。
 - Agent 审计模式检查用户 Agent 的显式提示词、计划或输出，生成推理缺口、对抗测试、验证计划和改进指令。
 - 四阶段决策闭环：`SENSE → CHALLENGE → DECIDE → GUARD`。
 - 先计算确定性的外部视角风险信号，再由模型挑战假设，最后由守门器阻止过度乐观的自动执行。
@@ -79,6 +83,16 @@ GITHUB_TOKEN=
 
 `auto` 默认按 DeepSeek → OpenAI → 本地规则的顺序路由。也可把 `AI_PROVIDER` 设置为 `openai`，让 OpenAI 优先。不要把真实密钥提交到 Git；只有占位的 `.env.example` 会进入版本控制。
 
+### 运行真实 Runner
+
+先在“任务执行”模式生成预测。结果卡会显示一个 Runner ID。然后在需要验证的目标仓库执行：
+
+```bash
+npm run runner -- --run <RUNNER_ID> --api http://localhost:3000 --repo . --test "npm test" --build "npm run build"
+```
+
+Runner 只执行命令行中显式提供的命令，并记录测试、构建、Diff 文件数和增删行数。服务端根据这些确定性结果结算，不允许模型自行宣布成功。生产环境应配置 `RUNNER_SHARED_SECRET`；完整说明见 [Runner 闭环](docs/runner.md)。
+
 ### 验证
 
 ```bash
@@ -103,17 +117,18 @@ GUARD：前置条件 + 验证步骤 + 中止条件
    ↓
 Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
    ↓
-独立 Coding Agent 执行（下一阶段）
+SelfOdds Runner：显式测试命令 + 构建命令 + Git Diff
    ↓
-测试、构建、Diff 和人工审核结算真实结果
+服务端确定性结算真实结果并写入 D1
    ↓
-校准曲线、Brier Score、模型与任务路由策略
+校准器、Brier Score、排行榜与失败知识图谱
 ```
 
 详细设计参见：
 
 - [系统架构](docs/architecture.md)
 - [Agent API](docs/agent-api.md)
+- [Runner 闭环](docs/runner.md)
 - [公开评判与自动校准标准](docs/evaluation-standard.md)
 
 ## API
@@ -160,12 +175,14 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 - [x] D1 预测存储与 7 天 GitHub 自动结算
 - [x] DeepSeek 长输出修复与三模式 Schema 稳定化
 - [ ] 从 weekly-rank 自动批量导入候选项目
-- [ ] 接入 GitHub Issue 与 PR 证据
-- [ ] 接入真实 Coding Agent Runner
-- [ ] 使用测试、构建和 Diff 自动结算
-- [ ] D1 持久化与团队排行榜
-- [ ] 基于真实运行的概率校准器
-- [ ] 失败模式知识库与知识图谱
+- [x] 接入 GitHub Issue 与 PR 证据
+- [x] 接入本地真实 Coding Agent Runner MVP
+- [x] 使用测试、构建和 Diff 自动结算
+- [x] D1 持久化与团队 / 模型排行榜
+- [x] 基于真实运行的概率校准器 MVP
+- [x] 失败模式知识库与关系图谱 MVP
+- [ ] Runner 隔离容器、资源限额与 GitHub Actions 执行器
+- [ ] 基于数百条真实样本的分任务校准模型
 
 ## English
 
