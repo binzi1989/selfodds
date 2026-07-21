@@ -59,7 +59,10 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
     reasoning_gaps: [],
     adversarial_tests: [],
     agent_improvement: null,
-    success_probability: 90,
+    // DeepSeek sometimes returns null for this cross-mode field. The route must
+    // repair it from the deterministic outside-view prior instead of discarding
+    // the otherwise valid assessment.
+    success_probability: null,
     confidence_quality: "HIGH",
     risk: "LOW",
     route: "AUTORUN",
@@ -133,6 +136,7 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
   assert.deepEqual(payload.trace.stages, ["SENSE", "CHALLENGE", "DECIDE", "GUARD"]);
   assert.equal(payload.assessment.route, "REVIEW");
   assert.equal(payload.assessment.risk, "MEDIUM");
+  assert.equal(typeof payload.assessment.success_probability, "number");
   assert.ok(payload.assessment.guardrails_applied.length > 0);
   assert.equal(capturedBody.model, "deepseek-v4-flash");
   assert.deepEqual(capturedBody.response_format, { type: "json_object" });

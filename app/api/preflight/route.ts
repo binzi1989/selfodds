@@ -118,6 +118,8 @@ Set opportunity_score to the weighted rubric score. Never turn stars directly in
 For PROJECT_OPPORTUNITY, perform a precise demand analysis: target user, concrete job/problem, current alternative, urgency, evidence for demand, counter-evidence, unknowns, and one falsifiable hypothesis. Create an evidence ledger for material claims. OBSERVED means directly present in supplied GitHub evidence or user input; INFERRED means a defensible interpretation; UNKNOWN means the evidence does not establish the claim. Never label a model inference as observed.
 
 trend_probability is a separate, calibratable probability that repository momentum will meet the supplied seven-day forecast contract. It is not the opportunity score. For other modes it must be null.
+success_probability must always be an integer from 5 to 95 in every mode. For PROJECT_OPPORTUNITY it means the probability that the recommended seven-day experiment can be completed and produce a decisive result; it must never be null.
+Be compact: each list should normally contain 2-4 items, each item should be one short sentence, and the evidence ledger should contain at most 6 material claims.
 
 Routing policy:
 - AUTORUN only when probability >= 85, blast radius is low, required context is present, and verification is deterministic.
@@ -312,13 +314,26 @@ function buildMessages(
   };
 }
 
-function parseJsonAssessment(content: string | null) {
+function boundedNumber(value: unknown, minimum: number, maximum: number, fallback: number) {
+  const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isFinite(numeric) ? Math.max(minimum, Math.min(maximum, Math.round(numeric))) : fallback;
+}
+
+function parseJsonAssessment(content: string | null, fallbackSuccessProbability: number) {
   if (!content) throw new Error("EMPTY_MODEL_RESULT");
   const cleaned = content.trim().replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
   const value = JSON.parse(cleaned) as Record<string, unknown>;
   const kind = value.assessment_kind;
-  const estimatedMinutes = Number(value.estimated_minutes);
-  const estimatedCost = Number(value.estimated_cost_usd);
+  const rubric = value.rubric_scores && typeof value.rubric_scores === "object"
+    ? value.rubric_scores as Record<string, unknown>
+    : null;
+  const derivedSuccess = rubric
+    ? Math.round((boundedNumber(rubric.buildability, 0, 100, fallbackSuccessProbability)
+      + boundedNumber(rubric.evidence, 0, 100, fallbackSuccessProbability)) / 2)
+    : fallbackSuccessProbability;
+  const estimatedCost = typeof value.estimated_cost_usd === "number"
+    ? value.estimated_cost_usd
+    : Number(value.estimated_cost_usd);
   return AssessmentSchema.parse({
     opportunity_score: null,
     rubric_scores: null,
@@ -331,7 +346,11 @@ function parseJsonAssessment(content: string | null) {
     agent_improvement: null,
     ...value,
     assessment_kind: kind === "PROJECT_OPPORTUNITY" || kind === "AGENT_AUDIT" ? kind : "TASK_FEASIBILITY",
-    estimated_minutes: Number.isFinite(estimatedMinutes) ? Math.max(1, Math.min(1440, Math.round(estimatedMinutes))) : 30,
+    success_probability: boundedNumber(value.success_probability, 5, 95, derivedSuccess),
+    trend_probability: kind === "PROJECT_OPPORTUNITY"
+      ? boundedNumber(value.trend_probability, 5, 95, boundedNumber(rubric?.momentum, 5, 95, 50))
+      : null,
+    estimated_minutes: boundedNumber(value.estimated_minutes, 1, 1440, 30),
     estimated_cost_usd: Number.isFinite(estimatedCost) ? Math.max(0.01, Math.min(1000, estimatedCost)) : 1,
   });
 }
@@ -348,7 +367,7 @@ async function assessWithDeepSeek(
   const client = new OpenAI({
     apiKey: process.env.DEEPSEEK_API_KEY,
     baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
-    timeout: 45_000,
+    timeout: 75_000,
     maxRetries: 1,
   });
   const messages = buildMessages(task, repository, language, signals, mode, evidence);
@@ -359,11 +378,11 @@ async function assessWithDeepSeek(
       { role: "user", content: messages.user },
     ],
     response_format: { type: "json_object" },
-    max_tokens: 3200,
+    max_tokens: 5000,
   });
   const usage = response.usage;
   return {
-    assessment: parseJsonAssessment(response.choices[0]?.message?.content ?? null),
+    assessment: parseJsonAssessment(response.choices[0]?.message?.content ?? null, outsideViewPrior(signals)),
     provider: "deepseek",
     model,
     usage: usage ? {
@@ -383,7 +402,7 @@ async function assessWithOpenAI(
   evidence: RepositoryEvidence,
 ): Promise<ProviderResult> {
   const model = process.env.OPENAI_MODEL || "gpt-5.6-terra";
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 45_000, maxRetries: 1 });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 75_000, maxRetries: 1 });
   const messages = buildMessages(task, repository, language, signals, mode, evidence);
   const response = await client.responses.parse({
     model,
@@ -425,6 +444,27 @@ function errorResponse(message: string, status: number, code: string, extra: Rec
   return Response.json({ ok: false, code, message, ...extra }, { status });
 }
 
+function providerFailureCode(error: unknown) {
+  if (error instanceof z.ZodError || error instanceof SyntaxError || (error instanceof Error && error.message === "EMPTY_MODEL_RESULT")) {
+    return "AGENT_INVALID_OUTPUT";
+  }
+  const status = typeof error === "object" && error !== null && "status" in error ? Number(error.status) : 0;
+  if (status === 401 || status === 403) return "AGENT_AUTH_FAILED";
+  if (status === 429) return "AGENT_RATE_LIMITED";
+  const text = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
+  if (text.includes("timeout") || text.includes("timed out") || text.includes("abort")) return "AGENT_TIMEOUT";
+  return "AGENT_UPSTREAM_ERROR";
+}
+
+function providerFailureFields(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return [...new Set(error.issues.map((issue) => issue.path.join(".") || "$root"))].slice(0, 8);
+  }
+  if (error instanceof SyntaxError) return ["$json"];
+  if (error instanceof Error && error.message === "EMPTY_MODEL_RESULT") return ["$empty"];
+  return [];
+}
+
 export async function POST(request: Request) {
   let payload: unknown;
   try {
@@ -451,6 +491,7 @@ export async function POST(request: Request) {
   const repositoryEvidence = await fetchRepositoryEvidence(parsed.data.repository);
   const signals = computeRiskSignals(parsed.data.task, parsed.data.repository, repositoryEvidence.status);
   const attempted: Provider[] = [];
+  const failures: Array<{ provider: Provider; code: string; fields: string[] }> = [];
 
   for (const provider of providers) {
     attempted.push(provider);
@@ -532,15 +573,26 @@ export async function POST(request: Request) {
         usage: result.usage,
       });
     } catch (error) {
-      console.error("SelfOdds provider failed", provider, error instanceof Error ? error.message : "unknown error");
+      const code = providerFailureCode(error);
+      failures.push({ provider, code, fields: providerFailureFields(error) });
+      console.error("SelfOdds provider failed", provider, code, error instanceof Error ? error.message : "unknown error");
       // Provider failures are intentionally opaque to clients; the next configured provider gets one attempt.
     }
   }
 
+  const terminalCode = failures.every((failure) => failure.code === "AGENT_INVALID_OUTPUT")
+    ? "AGENT_INVALID_OUTPUT"
+    : failures.some((failure) => failure.code === "AGENT_AUTH_FAILED")
+      ? "AGENT_AUTH_FAILED"
+      : failures.some((failure) => failure.code === "AGENT_RATE_LIMITED")
+        ? "AGENT_RATE_LIMITED"
+        : failures.some((failure) => failure.code === "AGENT_TIMEOUT")
+          ? "AGENT_TIMEOUT"
+          : "AGENT_UNAVAILABLE";
   return errorResponse(
     "Preflight Agent 暂时不可用，前端将使用本地降级评估。",
     502,
-    "AGENT_UNAVAILABLE",
-    { attempted_providers: attempted },
+    terminalCode,
+    { attempted_providers: attempted, failures },
   );
 }
