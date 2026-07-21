@@ -1,98 +1,125 @@
-# vinext-starter
+# SelfOdds
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+> 让 AI Agent 在行动之前，先预测自己能不能成功。
 
-## Prerequisites
+SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Agent 花费推理成本、修改代码或接触生产系统之前，生成结构化的成功概率、风险等级、预计成本、失败模式和验证计划；任务完成后，再使用真实结果结算预测并计算校准指标。
+
+**在线演示：** [selfodds-preflight.xiaozongzi1989.chatgpt.site](https://selfodds-preflight.xiaozongzi1989.chatgpt.site)
+
+## 为什么需要 SelfOdds
+
+传统 Agent 评估通常发生在执行之后。SelfOdds 将判断前移：
+
+- 这个任务应该自动运行、人工审查，还是暂停并补充上下文？
+- Agent 报告的 80% 成功率，长期看是否真的约等于 80%？
+- 哪类模型、工具和任务组合最容易“自信地失败”？
+- 能否在维持成功率的同时减少无效 Token、重试和事故？
+
+## 当前能力
+
+- 默认中文界面，可一键切换英文。
+- 服务端 Preflight Agent，使用 OpenAI Responses API。
+- 严格结构化输出：概率、风险、路由、成本、耗时、失败模式、验证步骤和关键假设。
+- 三档路由：`AUTORUN`、`REVIEW`、`ESCALATE`。
+- API 未配置或异常时，明确切换到可解释的本地规则，不伪装为 AI 结果。
+- 本机预测账本、PASS/FAIL 结算、Brier Score 和校准分。
+- 响应式界面和中英文文案。
+
+## 快速开始
+
+### 环境要求
 
 - Node.js `>=22.13.0`
+- 可选：OpenAI API Key。没有 Key 时仍可运行本地降级版。
 
-## Quick Start
+### 安装与运行
 
 ```bash
 npm install
+copy .env.example .env.local
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+在 `.env.local` 中配置：
 
-## Included Shape
+```env
+OPENAI_API_KEY=your_api_key
+OPENAI_MODEL=gpt-5.6-terra
+```
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+不要把真实密钥提交到 Git。`.env*` 已被忽略。
 
-## Workspace Auth Headers
+### 验证
 
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
+```bash
+npm test
+npm run lint
+```
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+## 工作原理
 
-Treat the full name as optional and fall back to email when it is absent:
+```text
+任务说明
+   ↓
+Preflight Agent：外部视角基准 + 风险因素 + 可验证性
+   ↓
+Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
+   ↓
+独立 Coding Agent 执行（下一阶段）
+   ↓
+测试、构建、Diff 和人工审核结算真实结果
+   ↓
+校准曲线、Brier Score、模型与任务路由策略
+```
 
-```tsx
-import { headers } from "next/headers";
+详细设计参见：
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+- [系统架构](docs/architecture.md)
+- [Agent API](docs/agent-api.md)
 
-  const displayName = fullName ?? email;
-  // ...
+## API
+
+`POST /api/preflight`
+
+请求：
+
+```json
+{
+  "task": "修复支付回调重复处理并增加幂等性测试",
+  "repository": "github.com/acme/payments-api",
+  "language": "zh"
 }
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+密钥只在服务端读取，浏览器不会接触 `OPENAI_API_KEY`。
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## 数据与知识层路线
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+第一阶段不建立空泛的知识图谱。先积累可结算运行记录：
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+```text
+任务类型 × 模型 × 工具 × 仓库特征 × 预测 × 失败原因 × 实际结果
+```
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+达到数百条真实记录后，再建设失败模式知识库和关系图谱，用于相似任务检索、先验概率和路由。
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+## 路线图
 
-## Useful Commands
+- [x] 中英文 Preflight 产品原型
+- [x] OpenAI 结构化评估 Agent
+- [x] 本地降级与结果来源标记
+- [x] 预测账本与 Brier Score
+- [ ] 接入 GitHub Issue 与仓库元数据
+- [ ] 接入真实 Coding Agent Runner
+- [ ] 使用测试、构建和 Diff 自动结算
+- [ ] D1 持久化与团队排行榜
+- [ ] 基于真实运行的概率校准器
+- [ ] 失败模式知识库与知识图谱
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## English
 
-## Learn More
+SelfOdds is a pre-execution reliability and calibration layer for AI agents. It predicts task success, cost, duration, failure modes, and the correct autonomy route before an agent acts, then scores that forecast against the real outcome.
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+## License
+
+[MIT](LICENSE)
