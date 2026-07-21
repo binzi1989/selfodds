@@ -1,0 +1,20 @@
+CREATE TABLE `forecasts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`repository` text NOT NULL,
+	`repo_full_name` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`due_at` integer NOT NULL,
+	`baseline_stars` integer NOT NULL,
+	`baseline_pushed_at` text,
+	`star_threshold` integer NOT NULL,
+	`trend_probability` integer NOT NULL,
+	`opportunity_score` integer,
+	`evidence_quality` text NOT NULL,
+	`status` text DEFAULT 'pending' NOT NULL,
+	`outcome` integer,
+	`resolved_at` integer,
+	`observed_stars` integer,
+	`observed_pushed_at` text,
+	`brier` real,
+	`assessment_json` text NOT NULL
+);

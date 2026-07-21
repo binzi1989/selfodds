@@ -1,0 +1,1 @@
+CREATE INDEX `forecasts_status_due_idx` ON `forecasts` (`status`,`due_at`);

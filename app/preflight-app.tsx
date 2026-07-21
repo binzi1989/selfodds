@@ -38,6 +38,39 @@ type Run = {
   opportunityScore?: number | null;
   rubricScores?: Record<"demand" | "momentum" | "differentiation" | "buildability" | "distribution" | "evidence", number> | null;
   recommendedExperiment?: string | null;
+  trendProbability?: number | null;
+  demandAnalysis?: {
+    target_user: string;
+    core_problem: string;
+    current_alternative: string;
+    urgency: "LOW" | "MEDIUM" | "HIGH";
+    demand_evidence: string[];
+    counter_evidence: string[];
+    unknowns: string[];
+    falsifiable_hypothesis: string;
+  } | null;
+  evidenceLedger?: Array<{
+    claim: string;
+    status: "OBSERVED" | "INFERRED" | "UNKNOWN";
+    source: "REPO_METADATA" | "README" | "REPO_STRUCTURE" | "USER_INPUT" | "NONE";
+    direction: "POSITIVE" | "NEGATIVE" | "NEUTRAL";
+  }>;
+  standard?: {
+    version: string;
+    score: number;
+    grade: "A" | "B" | "C" | "D";
+    band: "STRONG_EXPERIMENT" | "WORTH_TESTING" | "WEAK_EVIDENCE" | "PASS";
+    weights: Record<string, number>;
+    thresholds: Record<string, number>;
+    definitions?: Record<string, string>;
+    anchors?: Record<string, string>;
+  } | null;
+  calibrationForecast?: {
+    probability: number;
+    interval: { lower: number; upper: number };
+    contract: { horizon_days: number; star_growth_threshold: number; description: string };
+  } | null;
+  calibrationDueAt?: number | null;
   reasoningGaps?: string[];
   adversarialTests?: string[];
   agentImprovement?: string | null;
@@ -65,6 +98,9 @@ type AgentResponse = {
     opportunity_score: number | null;
     rubric_scores: Run["rubricScores"];
     recommended_experiment: string | null;
+    trend_probability: number | null;
+    demand_analysis: Run["demandAnalysis"];
+    evidence_ledger: NonNullable<Run["evidenceLedger"]>;
     reasoning_gaps: string[];
     adversarial_tests: string[];
     agent_improvement: string | null;
@@ -83,6 +119,9 @@ type AgentResponse = {
     assumptions: string[];
     guardrails_applied: string[];
   };
+  standard?: Run["standard"];
+  calibration_forecast?: Run["calibrationForecast"];
+  calibration_record?: { id: string; due_at: number } | null;
   trace?: {
     stages: string[];
     outside_view_prior: number;
@@ -93,6 +132,16 @@ type AgentResponse = {
   };
   code?: string;
   message?: string;
+};
+
+type CalibrationSummary = {
+  storage_available?: boolean;
+  total: number;
+  pending: number;
+  resolved: number;
+  actual_success_rate: number | null;
+  brier_score: number | null;
+  calibration_score: number | null;
 };
 
 const STORAGE_KEY = "selfodds-runs-v2";
@@ -130,6 +179,31 @@ const copy = {
     successProbability: "成功概率",
     opportunityScore: "项目机会分",
     executionProbability: "实验执行成功率",
+    trendProbability: "7 天趋势延续概率",
+    probabilityRange: "合理区间",
+    autoSettlement: "自动结算标准",
+    settlesAt: "预计结算",
+    grade: "评级",
+    observed: "已观察",
+    inferred: "合理推断",
+    unknown: "尚未验证",
+    demandAnalysis: "精准需求分析",
+    targetUser: "目标用户",
+    coreProblem: "核心问题",
+    currentAlternative: "当前替代方案",
+    urgency: "紧迫度",
+    demandEvidence: "需求证据",
+    counterEvidence: "反向证据",
+    unknowns: "仍未知",
+    hypothesis: "可证伪假设",
+    evidenceLedger: "证据账本",
+    scoreStandard: "公开评判标准",
+    anchor0: "0：证据反驳该判断，或完全没有有效信号",
+    anchor25: "25：只有项目自述或弱代理指标",
+    anchor50: "50：问题清楚，但关键假设尚未验证",
+    anchor75: "75：多个独立的已观察信号相互支持",
+    anchor100: "100：反复出现的真实结果已经充分证明",
+    calibrationPending: "等待 7 天真实结果，系统将自动结算",
     rubric: "机会评分依据",
     recommendedExperiment: "推荐最小实验",
     repositoryEvidence: "自动读取的仓库证据",
@@ -164,7 +238,7 @@ const copy = {
     realityLedger: "真实结果账本",
     ledgerTitle: "让自信接受结果检验。",
     runs: "运行记录",
-    benchmark: "排行榜",
+    benchmark: "评判标准",
     resolvedRuns: "已结算任务",
     actualSuccess: "实际成功率",
     calibrationMetric: "校准度",
@@ -222,6 +296,31 @@ const copy = {
     successProbability: "SUCCESS PROBABILITY",
     opportunityScore: "OPPORTUNITY SCORE",
     executionProbability: "EXPERIMENT SUCCESS PROBABILITY",
+    trendProbability: "7-DAY MOMENTUM PROBABILITY",
+    probabilityRange: "PLAUSIBLE RANGE",
+    autoSettlement: "AUTOMATIC SETTLEMENT CONTRACT",
+    settlesAt: "DUE",
+    grade: "GRADE",
+    observed: "OBSERVED",
+    inferred: "INFERRED",
+    unknown: "UNKNOWN",
+    demandAnalysis: "PRECISE DEMAND ANALYSIS",
+    targetUser: "TARGET USER",
+    coreProblem: "CORE PROBLEM",
+    currentAlternative: "CURRENT ALTERNATIVE",
+    urgency: "URGENCY",
+    demandEvidence: "DEMAND EVIDENCE",
+    counterEvidence: "COUNTER-EVIDENCE",
+    unknowns: "UNKNOWNS",
+    hypothesis: "FALSIFIABLE HYPOTHESIS",
+    evidenceLedger: "EVIDENCE LEDGER",
+    scoreStandard: "PUBLIC SCORING STANDARD",
+    anchor0: "0: Evidence contradicts the claim or no useful signal exists",
+    anchor25: "25: Only a self-reported claim or weak proxy exists",
+    anchor50: "50: Clear claim, but key assumptions remain unvalidated",
+    anchor75: "75: Multiple independent observed signals agree",
+    anchor100: "100: Repeated real-world outcomes establish the claim",
+    calibrationPending: "Waiting for the seven-day outcome; settlement is automatic",
     rubric: "OPPORTUNITY RUBRIC",
     recommendedExperiment: "RECOMMENDED MINIMUM EXPERIMENT",
     repositoryEvidence: "AUTOMATIC REPOSITORY EVIDENCE",
@@ -256,7 +355,7 @@ const copy = {
     realityLedger: "REALITY LEDGER",
     ledgerTitle: "Confidence meets consequence.",
     runs: "RUNS",
-    benchmark: "BENCHMARK",
+    benchmark: "STANDARD",
     resolvedRuns: "RESOLVED RUNS",
     actualSuccess: "ACTUAL SUCCESS",
     calibrationMetric: "CALIBRATION",
@@ -360,11 +459,10 @@ const sampleRuns: Run[] = [
   },
 ];
 
-const benchmarkRows = [
-  { name: "Codex runner", tasks: 128, success: 76, calibration: 88, brier: ".142" },
-  { name: "Claude runner", tasks: 128, success: 79, calibration: 81, brier: ".168" },
-  { name: "Gemini runner", tasks: 128, success: 71, calibration: 73, brier: ".194" },
-];
+const scoringWeights = [
+  ["demand", 25], ["momentum", 15], ["differentiation", 20],
+  ["buildability", 20], ["distribution", 10], ["evidence", 10],
+] as const;
 
 function hashText(text: string) {
   let hash = 0;
@@ -458,6 +556,12 @@ function createLocalAssessment(task: string, repo: string, language: Language, m
     recommendedExperiment: mode === "project"
       ? (zh ? "先用 7 天构建一个只验证核心需求与差异化假设的最小原型。" : "Build a seven-day prototype that tests only the core demand and differentiation assumptions.")
       : null,
+    trendProbability: mode === "project" ? probability : null,
+    demandAnalysis: null,
+    evidenceLedger: [],
+    standard: null,
+    calibrationForecast: null,
+    calibrationDueAt: null,
     reasoningGaps: mode === "agent" ? risks : [],
     adversarialTests: mode === "agent" ? checks : [],
     agentImprovement: mode === "agent"
@@ -500,6 +604,12 @@ function mapAgentAssessment(response: AgentResponse, task: string, repo: string,
     opportunityScore: assessment.opportunity_score,
     rubricScores: assessment.rubric_scores,
     recommendedExperiment: assessment.recommended_experiment,
+    trendProbability: assessment.trend_probability,
+    demandAnalysis: assessment.demand_analysis,
+    evidenceLedger: assessment.evidence_ledger,
+    standard: response.standard || null,
+    calibrationForecast: response.calibration_forecast || null,
+    calibrationDueAt: response.calibration_record?.due_at || null,
     reasoningGaps: assessment.reasoning_gaps,
     adversarialTests: assessment.adversarial_tests,
     agentImprovement: assessment.agent_improvement,
@@ -507,29 +617,17 @@ function mapAgentAssessment(response: AgentResponse, task: string, repo: string,
   };
 }
 
-function brierScore(runs: Run[]) {
-  const resolved = runs.filter((run) => run.outcome !== "pending");
-  if (!resolved.length) return 0;
-  return resolved.reduce((sum, run) => {
-    const outcome = run.outcome === "success" ? 1 : 0;
-    return sum + (run.probability / 100 - outcome) ** 2;
-  }, 0) / resolved.length;
-}
-
 export function PreflightApp() {
   const [language, setLanguage] = useState<Language>("zh");
   const [mode, setMode] = useState<AssessmentMode>("project");
   const [task, setTask] = useState("修复支付服务中的重复 Webhook 处理，并补充幂等性测试");
   const [repo, setRepo] = useState("github.com/acme/payments-api");
-  const [runs, setRuns] = useState<Run[]>(sampleRuns);
-  const [activeRun, setActiveRun] = useState<Run>(() => createLocalAssessment(
-    "修复支付服务中的重复 Webhook 处理，并补充幂等性测试",
-    "github.com/acme/payments-api",
-    "zh",
-  ));
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [activeRun, setActiveRun] = useState<Run>(() => sampleRuns[0]);
   const [analyzing, setAnalyzing] = useState(false);
   const [activeView, setActiveView] = useState<"runs" | "benchmark">("runs");
   const [notice, setNotice] = useState("");
+  const [calibration, setCalibration] = useState<CalibrationSummary>({ total: 0, pending: 0, resolved: 0, actual_success_rate: null, brier_score: null, calibration_score: null });
   const t = copy[language];
 
   useEffect(() => {
@@ -560,17 +658,23 @@ export function PreflightApp() {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
   }, [language]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/calibration")
+      .then((response) => response.json())
+      .then((value: CalibrationSummary) => { if (!cancelled) setCalibration(value); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [runs.length]);
+
   const metrics = useMemo(() => {
-    const resolved = runs.filter((run) => run.outcome !== "pending");
-    const successes = resolved.filter((run) => run.outcome === "success").length;
-    const brier = brierScore(runs);
     return {
-      resolved: resolved.length,
-      successRate: resolved.length ? Math.round((successes / resolved.length) * 100) : 0,
-      calibration: resolved.length ? Math.max(0, Math.round((1 - brier) * 100)) : 0,
-      brier: brier.toFixed(3),
+      resolved: calibration.resolved,
+      successRate: calibration.actual_success_rate,
+      calibration: calibration.calibration_score,
+      brier: calibration.brier_score?.toFixed(3) ?? "—",
     };
-  }, [runs]);
+  }, [calibration]);
 
   async function runPreflight(event: FormEvent) {
     event.preventDefault();
@@ -644,7 +748,7 @@ export function PreflightApp() {
             <p>{t.intro}</p>
           </div>
           <div className="hero-proof">
-            <div className="proof-number">{metrics.calibration}<small>/100</small></div>
+            <div className="proof-number">{metrics.calibration ?? "—"}<small>/100</small></div>
             <span>{t.calibration}</span><p>{t.proof}</p>
           </div>
         </div>
@@ -692,7 +796,7 @@ export function PreflightApp() {
           )}
           {activeRun.assessmentKind === "PROJECT_OPPORTUNITY" && activeRun.opportunityScore !== null && activeRun.opportunityScore !== undefined && (
             <section className="opportunity-card">
-              <div className="opportunity-score"><strong>{activeRun.opportunityScore}</strong><span>/100<br />{t.opportunityScore}</span></div>
+              <div className="opportunity-score"><strong>{activeRun.opportunityScore}</strong><span>/100<br />{t.opportunityScore}</span>{activeRun.standard && <b>{t.grade} {activeRun.standard.grade} · {activeRun.standard.band.replaceAll("_", " ")}</b>}</div>
               {activeRun.rubricScores && (
                 <div className="rubric-grid">
                   {([
@@ -702,6 +806,42 @@ export function PreflightApp() {
                 </div>
               )}
               {activeRun.recommendedExperiment && <div className="experiment-line"><span>{t.recommendedExperiment}</span><p>{activeRun.recommendedExperiment}</p></div>}
+              {activeRun.calibrationForecast && (
+                <div className="forecast-contract">
+                  <div><span>{t.trendProbability}</span><strong>{activeRun.calibrationForecast.probability}%</strong></div>
+                  <div><span>{t.probabilityRange}</span><strong>{activeRun.calibrationForecast.interval.lower}–{activeRun.calibrationForecast.interval.upper}%</strong></div>
+                  <p><b>{t.autoSettlement}</b>{activeRun.calibrationForecast.contract.description}</p>
+                  <small>{t.calibrationPending}{activeRun.calibrationDueAt ? ` · ${t.settlesAt} ${new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en", { dateStyle: "medium" }).format(new Date(activeRun.calibrationDueAt))}` : ""}</small>
+                </div>
+              )}
+            </section>
+          )}
+          {activeRun.demandAnalysis && (
+            <section className="demand-analysis">
+              <h2>{t.demandAnalysis}</h2>
+              <div className="demand-facts">
+                <div><span>{t.targetUser}</span><p>{activeRun.demandAnalysis.target_user}</p></div>
+                <div><span>{t.coreProblem}</span><p>{activeRun.demandAnalysis.core_problem}</p></div>
+                <div><span>{t.currentAlternative}</span><p>{activeRun.demandAnalysis.current_alternative}</p></div>
+                <div><span>{t.urgency}</span><p>{activeRun.demandAnalysis.urgency}</p></div>
+              </div>
+              <div className="demand-lists">
+                <div><h3>{t.demandEvidence}</h3><ul>{activeRun.demandAnalysis.demand_evidence.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                <div><h3>{t.counterEvidence}</h3><ul>{activeRun.demandAnalysis.counter_evidence.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                <div><h3>{t.unknowns}</h3><ul>{activeRun.demandAnalysis.unknowns.map((item) => <li key={item}>{item}</li>)}</ul></div>
+              </div>
+              <div className="hypothesis"><span>{t.hypothesis}</span><p>{activeRun.demandAnalysis.falsifiable_hypothesis}</p></div>
+            </section>
+          )}
+          {(activeRun.evidenceLedger || []).length > 0 && (
+            <section className="evidence-ledger">
+              <h2>{t.evidenceLedger}</h2>
+              {activeRun.evidenceLedger!.map((item, index) => (
+                <div key={`${item.claim}-${index}`}>
+                  <span className={`claim-status claim-${item.status.toLowerCase()}`}>{item.status === "OBSERVED" ? t.observed : item.status === "INFERRED" ? t.inferred : t.unknown}</span>
+                  <p>{item.claim}</p><small>{item.source.replaceAll("_", " ")}</small>
+                </div>
+              ))}
             </section>
           )}
           {activeRun.repositoryEvidence && (
@@ -767,8 +907,8 @@ export function PreflightApp() {
         </div>
         <div className="metric-strip">
           <div><span>{t.resolvedRuns}</span><strong>{metrics.resolved}</strong></div>
-          <div><span>{t.actualSuccess}</span><strong>{metrics.successRate}%</strong></div>
-          <div><span>{t.calibrationMetric}</span><strong>{metrics.calibration}</strong></div>
+          <div><span>{t.actualSuccess}</span><strong>{metrics.successRate === null ? "—" : `${metrics.successRate}%`}</strong></div>
+          <div><span>{t.calibrationMetric}</span><strong>{metrics.calibration ?? "—"}</strong></div>
           <div><span>{t.brier}</span><strong>{metrics.brier}</strong></div>
         </div>
 
@@ -782,10 +922,12 @@ export function PreflightApp() {
                 <div><span className={`mini-route route-${run.route.toLowerCase()}`}>{run.route}</span></div>
                 <div className="outcome-cell">
                   {run.outcome === "pending" ? (
-                    <div className="resolve-actions" aria-label={`Resolve ${run.task}`}>
-                      <button onClick={() => resolveRun(run.id, "success")}>{t.pass}</button>
-                      <button onClick={() => resolveRun(run.id, "failed")}>{t.fail}</button>
-                    </div>
+                    run.assessmentKind === "PROJECT_OPPORTUNITY"
+                      ? <span className="auto-pending">AUTO · 7D</span>
+                      : <div className="resolve-actions" aria-label={`Resolve ${run.task}`}>
+                          <button onClick={() => resolveRun(run.id, "success")}>{t.pass}</button>
+                          <button onClick={() => resolveRun(run.id, "failed")}>{t.fail}</button>
+                        </div>
                   ) : <span className={`outcome outcome-${run.outcome}`}>{run.outcome === "success" ? t.passed : t.failed}</span>}
                 </div>
               </div>
@@ -793,12 +935,14 @@ export function PreflightApp() {
           </div>
         ) : (
           <div className="benchmark" role="tabpanel">
-            <div className="benchmark-note">{t.sampleData}</div>
-            {benchmarkRows.map((row, index) => (
-              <div className="benchmark-row" key={row.name}>
-                <span className="rank">0{index + 1}</span><strong>{row.name}</strong><span>{row.tasks} TASKS</span><span>{row.success}% SUCCESS</span><span>{row.calibration} CALIBRATION</span><span>{row.brier} BRIER</span>
+            <div className="benchmark-note">{t.scoreStandard} · SELFODDS-OPPORTUNITY-V1</div>
+            {scoringWeights.map(([key, weight], index) => (
+              <div className="benchmark-row standard-row" key={key}>
+                <span className="rank">0{index + 1}</span><strong>{t[key]}</strong><span>{weight}% WEIGHT</span><span>0–100</span><span>FIXED</span><span>PUBLIC</span>
               </div>
             ))}
+            <div className="standard-thresholds"><span>A ≥ 80 · STRONG EXPERIMENT</span><span>B ≥ 65 · WORTH TESTING</span><span>C ≥ 50 · WEAK EVIDENCE</span><span>D &lt; 50 · PASS</span></div>
+            <div className="anchor-scale"><span>{t.anchor0}</span><span>{t.anchor25}</span><span>{t.anchor50}</span><span>{t.anchor75}</span><span>{t.anchor100}</span></div>
           </div>
         )}
       </section>

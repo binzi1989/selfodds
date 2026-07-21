@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 import { fetchRepositoryEvidence, parseGitHubRepository } from "../lib/github-evidence.ts";
+import { calculateOpportunityScore, opportunityGrade, predictionInterval, trendStarThreshold } from "../lib/evaluation-standard.ts";
 
 async function fetchApp(path = "/", init = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -27,6 +28,7 @@ test("server-renders the bilingual SelfOdds product shell", async () => {
   assert.match(html, /项目机会/);
   assert.match(html, /任务执行/);
   assert.match(html, /Agent 审计/);
+  assert.match(html, /评判标准/);
   assert.match(html, /缺失上下文/);
   assert.match(html, /中止条件/);
   assert.match(html, /中文/);
@@ -170,4 +172,28 @@ test("GitHub evidence is fetched and normalized before assessment", async () => 
   assert.equal(evidence.language, "TypeScript");
   assert.deepEqual(evidence.root_files, ["file:package.json", "dir:apps"]);
   assert.match(evidence.readme_excerpt, /focused README/);
+});
+
+test("opportunity scoring and calibration thresholds are deterministic", () => {
+  const score = calculateOpportunityScore({
+    demand: 80,
+    momentum: 70,
+    differentiation: 60,
+    buildability: 90,
+    distribution: 50,
+    evidence: 80,
+  });
+  assert.equal(score, 74);
+  assert.equal(opportunityGrade(score), "B");
+  assert.equal(trendStarThreshold(76534), 553);
+  assert.deepEqual(predictionInterval(70, "MEDIUM"), { lower: 55, upper: 85 });
+});
+
+test("calibration API degrades honestly when durable storage is unavailable", async () => {
+  const response = await fetchApp("/api/calibration");
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.storage_available, false);
+  assert.equal(payload.resolved, 0);
 });

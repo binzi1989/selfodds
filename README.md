@@ -22,6 +22,10 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 - 三种评估模式：项目机会、任务执行、用户 Agent 审计。
 - GitHub URL 自动研究：读取仓库元数据、README、根目录结构、活跃度、语言与许可证，再把证据交给模型。
 - 项目模式严格区分“机会分”和“最小实验执行成功率”，避免把热度、价值和可执行性混成一个数字。
+- 固定公开的评分权重、0/25/50/75/100 证据锚点和 A–D 等级，服务端确定性计算总分。
+- 精准需求分析：目标用户、核心问题、替代方案、紧迫度、正反证据、未知信息和可证伪假设。
+- 证据账本把每个重要结论标记为 `OBSERVED`、`INFERRED` 或 `UNKNOWN`。
+- 7 天 GitHub 趋势预测自动持久化并结算，自动计算真实成功率、Brier Score 和校准分。
 - Agent 审计模式检查用户 Agent 的显式提示词、计划或输出，生成推理缺口、对抗测试、验证计划和改进指令。
 - 四阶段决策闭环：`SENSE → CHALLENGE → DECIDE → GUARD`。
 - 先计算确定性的外部视角风险信号，再由模型挑战假设，最后由守门器阻止过度乐观的自动执行。
@@ -97,6 +101,7 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 
 - [系统架构](docs/architecture.md)
 - [Agent API](docs/agent-api.md)
+- [公开评判与自动校准标准](docs/evaluation-standard.md)
 
 ## API
 
@@ -138,6 +143,8 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 - [x] 预测账本与 Brier Score
 - [x] 自动读取 GitHub 仓库元数据、README 与根目录证据
 - [x] 项目机会 / 任务执行 / Agent 审计三模式
+- [x] 公开评分标准、证据账本与精准需求分析
+- [x] D1 预测存储与 7 天 GitHub 自动结算
 - [ ] 从 weekly-rank 自动批量导入候选项目
 - [ ] 接入 GitHub Issue 与 PR 证据
 - [ ] 接入真实 Coding Agent Runner

@@ -104,6 +104,7 @@ main { min-height: 100vh; overflow: hidden; }
 .opportunity-score { display: flex; align-items: end; gap: 14px; padding: 18px; background: #252f38; }
 .opportunity-score strong { color: var(--acid); font-size: 52px; line-height: .8; letter-spacing: -.05em; }
 .opportunity-score span { color: #aeb8b1; font: 700 9px/1.45 "Courier New", monospace; letter-spacing: .08em; }
+.opportunity-score b { margin-left: auto; border: 1px solid var(--acid); color: var(--acid); padding: 7px 9px; font: 700 9px "Courier New", monospace; letter-spacing: .06em; }
 .rubric-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
 .rubric-grid div { display: flex; justify-content: space-between; gap: 8px; padding: 11px 13px; border-top: 1px solid #44505a; border-right: 1px solid #44505a; }
 .rubric-grid div:nth-child(3n) { border-right: 0; }
@@ -112,6 +113,36 @@ main { min-height: 100vh; overflow: hidden; }
 .experiment-line { padding: 14px 16px; border-top: 1px solid #44505a; }
 .experiment-line span, .repository-evidence > span { color: var(--acid); font: 700 9px "Courier New", monospace; letter-spacing: .09em; }
 .experiment-line p, .repository-evidence p { margin: 7px 0 0; font-size: 12px; line-height: 1.5; }
+.forecast-contract { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #44505a; }
+.forecast-contract > div { padding: 14px 16px; border-right: 1px solid #44505a; }
+.forecast-contract > div:nth-child(2) { border-right: 0; }
+.forecast-contract span, .forecast-contract p b { display: block; color: #8e9991; font: 700 8px "Courier New", monospace; letter-spacing: .08em; }
+.forecast-contract strong { display: block; margin-top: 6px; color: white; font-size: 20px; }
+.forecast-contract p, .forecast-contract small { grid-column: 1 / -1; margin: 0; padding: 13px 16px; border-top: 1px solid #44505a; color: #c8d0ca; font-size: 11px; line-height: 1.5; }
+.forecast-contract p b { margin-bottom: 5px; color: var(--acid); }
+.forecast-contract small { color: #8e9991; font-family: "Courier New", monospace; }
+.demand-analysis { margin: 0 0 28px; border: 1px solid #44505a; }
+.demand-analysis > h2, .evidence-ledger > h2 { margin: 0; padding: 13px 15px; background: #252f38; color: var(--acid); font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
+.demand-facts { display: grid; grid-template-columns: repeat(2, 1fr); }
+.demand-facts > div { padding: 14px; border-top: 1px solid #44505a; border-right: 1px solid #44505a; }
+.demand-facts > div:nth-child(2n) { border-right: 0; }
+.demand-facts span, .hypothesis span { color: #8e9991; font: 700 8px "Courier New", monospace; letter-spacing: .08em; }
+.demand-facts p, .hypothesis p { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.demand-lists { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid #44505a; }
+.demand-lists > div { padding: 14px; border-right: 1px solid #44505a; }
+.demand-lists > div:last-child { border-right: 0; }
+.demand-lists h3 { margin: 0 0 9px; color: #aeb8b1; font: 700 8px "Courier New", monospace; letter-spacing: .08em; }
+.demand-lists ul { margin: 0; padding-left: 16px; font-size: 11px; line-height: 1.45; }
+.hypothesis { padding: 14px; border-top: 1px solid #44505a; background: #252f38; }
+.hypothesis span { color: var(--acid); }
+.evidence-ledger { margin: 0 0 28px; border: 1px solid #44505a; }
+.evidence-ledger > div { display: grid; grid-template-columns: 90px 1fr 110px; align-items: start; gap: 10px; padding: 11px 13px; border-top: 1px solid #44505a; }
+.evidence-ledger p { margin: 0; font-size: 12px; line-height: 1.45; }
+.evidence-ledger small { color: #8e9991; text-align: right; font: 700 8px "Courier New", monospace; }
+.claim-status { width: max-content; padding: 4px 6px; border: 1px solid #68736b; color: #b7c1ba; font: 700 8px "Courier New", monospace; }
+.claim-observed { border-color: #48d672; color: #48d672; }
+.claim-inferred { border-color: #f0a64a; color: #f0a64a; }
+.claim-unknown { border-color: #ef746f; color: #ef746f; }
 .repository-evidence { margin: 0 0 28px; padding: 13px 15px; border-left: 3px solid #f0a64a; background: #252f38; }
 .repository-evidence.evidence-verified { border-left-color: #48d672; }
 .repository-evidence p { color: #b7c1ba; }
@@ -121,6 +152,13 @@ main { min-height: 100vh; overflow: hidden; }
 .agent-audit-card ul, .agent-audit-card ol { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
 .agent-audit-card .agent-improvement { grid-column: 1 / -1; }
 .agent-improvement p { margin: 0; color: #d7ded8; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.auto-pending { color: #815f00; font: 800 9px "Courier New", monospace; }
+.standard-thresholds { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--ink); }
+.standard-thresholds span { padding: 13px; border-right: 1px solid var(--ink); font: 700 9px "Courier New", monospace; }
+.standard-thresholds span:last-child { border-right: 0; }
+.anchor-scale { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--ink); background: #f4f1e7; }
+.anchor-scale span { padding: 13px; border-right: 1px solid var(--ink); font-size: 10px; line-height: 1.45; }
+.anchor-scale span:last-child { border-right: 0; }
 .decision-topline { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
 .probability { font-size: clamp(76px, 8.5vw, 128px); line-height: .8; letter-spacing: -.08em; font-weight: 800; }
 .probability sup { font-size: .32em; color: var(--acid); vertical-align: top; margin-left: 5px; }
@@ -222,8 +260,11 @@ footer > span { justify-self: end; color: #8f9993; }
   .estimate-grid div { border-right: 0; border-bottom: 1px solid #44505a; }
   .result-lists { grid-template-columns: 1fr; }
   .decision-details { grid-template-columns: 1fr; }
-  .mode-switch, .rubric-grid, .agent-audit-card { grid-template-columns: 1fr; }
+  .mode-switch, .rubric-grid, .agent-audit-card, .demand-facts, .demand-lists, .standard-thresholds, .anchor-scale { grid-template-columns: 1fr; }
   .agent-audit-card .agent-improvement { grid-column: auto; }
+  .demand-facts > div, .demand-lists > div, .standard-thresholds span, .anchor-scale span { border-right: 0; border-bottom: 1px solid #44505a; }
+  .evidence-ledger > div { grid-template-columns: 1fr; }
+  .evidence-ledger small { text-align: left; }
   .rubric-grid div, .rubric-grid div:nth-child(3n) { border-right: 0; }
   .ledger { padding: 62px 20px; }
   .section-title-row { display: block; }

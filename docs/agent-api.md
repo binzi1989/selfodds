@@ -24,7 +24,7 @@ Content-Type: application/json
   "source": "agent",
   "provider": "deepseek",
   "model": "deepseek-v4-flash",
-  "agent_version": "research-preflight-v3",
+  "agent_version": "evidence-calibration-v4",
   "latency_ms": 1280,
   "assessment": {
     "goal_summary": "修复支付回调幂等性并用并发测试证明",
@@ -32,6 +32,9 @@ Content-Type: application/json
     "opportunity_score": null,
     "rubric_scores": null,
     "recommended_experiment": null,
+    "trend_probability": null,
+    "demand_analysis": null,
+    "evidence_ledger": [],
     "reasoning_gaps": [],
     "adversarial_tests": [],
     "agent_improvement": null,
@@ -71,6 +74,10 @@ Content-Type: application/json
   }
 }
 ```
+
+项目模式还会返回 `standard`、`calibration_forecast` 与 `calibration_record`。`standard` 包含固定权重、等级和评分锚点；`calibration_forecast` 包含 7 天结果契约和概率区间；`calibration_record` 表示预测已经进入自动结算队列。
+
+`GET /api/calibration` 会结算到期预测，并返回已结算数量、实际成功率、Brier Score、校准分和概率分桶结果。该过程不要求用户手工标记结果。
 
 ## Error codes
 

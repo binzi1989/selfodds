@@ -17,6 +17,7 @@ POST /api/preflight
           │
           ├─ 请求校验与服务端密钥边界
           ├─ GitHub Evidence：元数据、README、根目录结构
+          ├─ Evidence Ledger：OBSERVED / INFERRED / UNKNOWN
           ├─ SENSE：确定性风险信号与外部视角先验
           ├─ CHALLENGE / DECIDE：DeepSeek V4 或 OpenAI
           ├─ GUARD：服务端路由与风险下限
@@ -28,6 +29,8 @@ Decision Token
   ├─ goal_summary / confidence_quality
   ├─ assessment_kind
   ├─ opportunity_score / rubric_scores
+  ├─ demand_analysis / evidence_ledger
+  ├─ trend_probability / prediction interval
   ├─ recommended_experiment
   ├─ reasoning_gaps / adversarial_tests
   ├─ agent_improvement
@@ -52,6 +55,8 @@ Decision Token
 概率定义为：任务在限定范围内被正确完成，并通过建议的验证步骤的概率。它不是模型对自己文案的主观自信。
 
 项目机会分是独立指标，由需求、趋势、差异化、可构建性、传播性和证据质量加权得出。它不参与自治路由，也不能用 Star 数量直接替代。Agent 审计只检查用户提供的显式提示词、计划和输出，不索取或伪造隐藏思维链。
+
+只有 7 天趋势概率进入自动校准。预测快照与到期时间持久化到 D1；每次访问校准接口时，系统自动结算到期记录并更新 Brier Score。机会指数不会被伪装成可校准概率。
 
 ## 安全边界
 

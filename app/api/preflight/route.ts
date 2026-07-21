@@ -2,6 +2,17 @@ import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { compactRepositoryEvidence, fetchRepositoryEvidence, type RepositoryEvidence } from "../../../lib/github-evidence.ts";
+import {
+  DIMENSION_DEFINITIONS,
+  OPPORTUNITY_WEIGHTS,
+  SCORE_ANCHORS,
+  SCORE_STANDARD_VERSION,
+  calculateOpportunityScore,
+  opportunityGrade,
+  predictionInterval,
+  scoreBand,
+  sevenDayForecastContract,
+} from "../../../lib/evaluation-standard.ts";
 
 const RequestSchema = z.object({
   task: z.string().trim().min(8).max(6000),
@@ -23,6 +34,23 @@ const AssessmentSchema = z.object({
     evidence: z.number().int().min(0).max(100),
   }).nullable(),
   recommended_experiment: z.string().min(8).max(320).nullable(),
+  trend_probability: z.number().int().min(5).max(95).nullable(),
+  demand_analysis: z.object({
+    target_user: z.string().min(3).max(180),
+    core_problem: z.string().min(3).max(220),
+    current_alternative: z.string().min(3).max(220),
+    urgency: z.enum(["LOW", "MEDIUM", "HIGH"]),
+    demand_evidence: z.array(z.string().min(3).max(220)).max(5),
+    counter_evidence: z.array(z.string().min(3).max(220)).max(5),
+    unknowns: z.array(z.string().min(3).max(220)).max(5),
+    falsifiable_hypothesis: z.string().min(8).max(320),
+  }).nullable(),
+  evidence_ledger: z.array(z.object({
+    claim: z.string().min(3).max(220),
+    status: z.enum(["OBSERVED", "INFERRED", "UNKNOWN"]),
+    source: z.enum(["REPO_METADATA", "README", "REPO_STRUCTURE", "USER_INPUT", "NONE"]),
+    direction: z.enum(["POSITIVE", "NEGATIVE", "NEUTRAL"]),
+  })).max(12),
   reasoning_gaps: z.array(z.string().min(3).max(220)).max(6),
   adversarial_tests: z.array(z.string().min(3).max(220)).max(6),
   agent_improvement: z.string().min(8).max(900).nullable(),
@@ -87,6 +115,10 @@ Project opportunity rubric and weights:
 - evidence 10%: README, repository structure, maintenance, license, and claims are verifiable.
 Set opportunity_score to the weighted rubric score. Never turn stars directly into a high opportunity score.
 
+For PROJECT_OPPORTUNITY, perform a precise demand analysis: target user, concrete job/problem, current alternative, urgency, evidence for demand, counter-evidence, unknowns, and one falsifiable hypothesis. Create an evidence ledger for material claims. OBSERVED means directly present in supplied GitHub evidence or user input; INFERRED means a defensible interpretation; UNKNOWN means the evidence does not establish the claim. Never label a model inference as observed.
+
+trend_probability is a separate, calibratable probability that repository momentum will meet the supplied seven-day forecast contract. It is not the opportunity score. For other modes it must be null.
+
 Routing policy:
 - AUTORUN only when probability >= 85, blast radius is low, required context is present, and verification is deterministic.
 - REVIEW when probability is 58-84 or human review materially limits risk.
@@ -101,6 +133,9 @@ const JSON_SHAPE = `Return one JSON object with exactly these fields:
   "opportunity_score": 72,
   "rubric_scores": {"demand": 70, "momentum": 80, "differentiation": 60, "buildability": 75, "distribution": 65, "evidence": 80},
   "recommended_experiment": "string or null",
+  "trend_probability": 65,
+  "demand_analysis": {"target_user":"string","core_problem":"string","current_alternative":"string","urgency":"LOW | MEDIUM | HIGH","demand_evidence":["string"],"counter_evidence":["string"],"unknowns":["string"],"falsifiable_hypothesis":"string"},
+  "evidence_ledger": [{"claim":"string","status":"OBSERVED | INFERRED | UNKNOWN","source":"REPO_METADATA | README | REPO_STRUCTURE | USER_INPUT | NONE","direction":"POSITIVE | NEGATIVE | NEUTRAL"}],
   "reasoning_gaps": ["string"],
   "adversarial_tests": ["string"],
   "agent_improvement": "string or null",
@@ -238,20 +273,16 @@ function normalizeOpportunityScore(assessment: Assessment, mode: AssessmentMode)
       opportunity_score: null,
       rubric_scores: null,
       recommended_experiment: null,
+      trend_probability: null,
+      demand_analysis: null,
+      evidence_ledger: assessment.evidence_ledger.filter((item) => item.source === "USER_INPUT"),
       reasoning_gaps: mode === "agent" ? assessment.reasoning_gaps : [],
       adversarial_tests: mode === "agent" ? assessment.adversarial_tests : [],
       agent_improvement: mode === "agent" ? assessment.agent_improvement : null,
     };
   }
   if (!assessment.rubric_scores) return assessment;
-  const score = Math.round(
-    assessment.rubric_scores.demand * 0.25
-    + assessment.rubric_scores.momentum * 0.15
-    + assessment.rubric_scores.differentiation * 0.20
-    + assessment.rubric_scores.buildability * 0.20
-    + assessment.rubric_scores.distribution * 0.10
-    + assessment.rubric_scores.evidence * 0.10,
-  );
+  const score = calculateOpportunityScore(assessment.rubric_scores);
   return {
     ...assessment,
     assessment_kind: "PROJECT_OPPORTUNITY",
@@ -272,9 +303,12 @@ function buildMessages(
     weight: signal.weight,
     description: signalCopy[language][signal.code],
   }));
+  const forecastContract = evidence.status === "verified" && evidence.stars !== undefined
+    ? sevenDayForecastContract(evidence.stars)
+    : null;
   return {
     system: `${SYSTEM_PROMPT}\n\n${languageInstruction(language)}\n\n${JSON_SHAPE}`,
-    user: `ASSESSMENT MODE:\n${mode === "project" ? "PROJECT_OPPORTUNITY" : mode === "agent" ? "AGENT_AUDIT" : "TASK_FEASIBILITY"}\n\nTASK, RESEARCH QUESTION, OR USER AGENT MATERIAL:\n${task}\n\nREPOSITORY INPUT:\n${repository || "Not supplied"}\n\nVERIFIED REPOSITORY EVIDENCE:\n${compactRepositoryEvidence(evidence)}\n\nOUTSIDE-VIEW PRIOR FOR EXECUTION SUCCESS:\n${outsideViewPrior(signals)}%\n\nDETERMINISTIC SIGNALS:\n${JSON.stringify(signalPayload)}`,
+    user: `ASSESSMENT MODE:\n${mode === "project" ? "PROJECT_OPPORTUNITY" : mode === "agent" ? "AGENT_AUDIT" : "TASK_FEASIBILITY"}\n\nTASK, RESEARCH QUESTION, OR USER AGENT MATERIAL:\n${task}\n\nREPOSITORY INPUT:\n${repository || "Not supplied"}\n\nVERIFIED REPOSITORY EVIDENCE:\n${compactRepositoryEvidence(evidence)}\n\nSEVEN-DAY CALIBRATION CONTRACT:\n${JSON.stringify(forecastContract)}\n\nOUTSIDE-VIEW PRIOR FOR EXECUTION SUCCESS:\n${outsideViewPrior(signals)}%\n\nDETERMINISTIC SIGNALS:\n${JSON.stringify(signalPayload)}`,
   };
 }
 
@@ -289,6 +323,9 @@ function parseJsonAssessment(content: string | null) {
     opportunity_score: null,
     rubric_scores: null,
     recommended_experiment: null,
+    trend_probability: null,
+    demand_analysis: null,
+    evidence_ledger: [],
     reasoning_gaps: [],
     adversarial_tests: [],
     agent_improvement: null,
@@ -423,14 +460,57 @@ export async function POST(request: Request) {
         : await assessWithOpenAI(parsed.data.task, parsed.data.repository, parsed.data.language, signals, mode, repositoryEvidence);
       const normalized = normalizeOpportunityScore(result.assessment, mode);
       const guarded = applyDecisionGuard(normalized, signals, parsed.data.language);
+      const opportunityStandard = mode === "project" && guarded.opportunity_score !== null
+        ? {
+            version: SCORE_STANDARD_VERSION,
+            score: guarded.opportunity_score,
+            grade: opportunityGrade(guarded.opportunity_score),
+            band: scoreBand(guarded.opportunity_score),
+            weights: OPPORTUNITY_WEIGHTS,
+            definitions: DIMENSION_DEFINITIONS,
+            anchors: SCORE_ANCHORS,
+            thresholds: { strong_experiment: 80, worth_testing: 65, weak_evidence: 50, pass: 0 },
+          }
+        : null;
+      const forecast = mode === "project"
+        && guarded.trend_probability !== null
+        && repositoryEvidence.status === "verified"
+        && repositoryEvidence.stars !== undefined
+        ? {
+            probability: guarded.trend_probability,
+            interval: predictionInterval(guarded.trend_probability, guarded.confidence_quality),
+            contract: sevenDayForecastContract(repositoryEvidence.stars),
+          }
+        : null;
+      let calibrationRecord: { id: string; created_at: number; due_at: number; contract: { horizon_days: number; star_growth_threshold: number; description: string } } | null = null;
+      if (forecast && repositoryEvidence.full_name) {
+        try {
+          const { saveForecast } = await import("../../../db/calibration.ts");
+          calibrationRecord = await saveForecast({
+            repository: parsed.data.repository,
+            repoFullName: repositoryEvidence.full_name,
+            baselineStars: repositoryEvidence.stars!,
+            baselinePushedAt: repositoryEvidence.pushed_at,
+            trendProbability: forecast.probability,
+            opportunityScore: guarded.opportunity_score,
+            evidenceQuality: guarded.confidence_quality,
+            assessment: guarded,
+          });
+        } catch (error) {
+          console.error("SelfOdds forecast persistence failed", error instanceof Error ? error.message : "unknown error");
+        }
+      }
       return Response.json({
         ok: true,
         source: "agent",
         provider: result.provider,
         model: result.model,
-        agent_version: "research-preflight-v3",
+        agent_version: "evidence-calibration-v4",
         latency_ms: Date.now() - startedAt,
         assessment: guarded,
+        standard: opportunityStandard,
+        calibration_forecast: forecast,
+        calibration_record: calibrationRecord,
         trace: {
           stages: ["SENSE", "CHALLENGE", "DECIDE", "GUARD"],
           outside_view_prior: outsideViewPrior(signals),
