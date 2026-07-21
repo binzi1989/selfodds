@@ -18,8 +18,10 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 ## 当前能力
 
 - 默认中文界面，可一键切换英文。
-- 服务端 Preflight Agent，使用 OpenAI Responses API。
-- 严格结构化输出：概率、风险、路由、成本、耗时、失败模式、验证步骤和关键假设。
+- 服务端 Preflight Agent，支持 DeepSeek V4 与 OpenAI 双提供商自动路由。
+- 四阶段决策闭环：`SENSE → CHALLENGE → DECIDE → GUARD`。
+- 先计算确定性的外部视角风险信号，再由模型挑战假设，最后由守门器阻止过度乐观的自动执行。
+- 严格结构化输出：目标复述、概率、证据质量、风险、路由、缺失上下文、前置条件、失败模式、验证步骤和中止条件。
 - 三档路由：`AUTORUN`、`REVIEW`、`ESCALATE`。
 - API 未配置或异常时，明确切换到可解释的本地规则，不伪装为 AI 结果。
 - 本机预测账本、PASS/FAIL 结算、Brier Score 和校准分。
@@ -30,7 +32,7 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 ### 环境要求
 
 - Node.js `>=22.13.0`
-- 可选：OpenAI API Key。没有 Key 时仍可运行本地降级版。
+- 可选：DeepSeek 或 OpenAI API Key。没有 Key 时仍可运行本地降级版。
 
 ### 安装与运行
 
@@ -43,11 +45,15 @@ npm run dev
 在 `.env.local` 中配置：
 
 ```env
+AI_PROVIDER=auto
+DEEPSEEK_API_KEY=your_deepseek_key
+DEEPSEEK_MODEL=deepseek-v4-flash
+
 OPENAI_API_KEY=your_api_key
 OPENAI_MODEL=gpt-5.6-terra
 ```
 
-不要把真实密钥提交到 Git。`.env*` 已被忽略。
+`auto` 默认按 DeepSeek → OpenAI → 本地规则的顺序路由。也可把 `AI_PROVIDER` 设置为 `openai`，让 OpenAI 优先。不要把真实密钥提交到 Git；只有占位的 `.env.example` 会进入版本控制。
 
 ### 验证
 
@@ -61,7 +67,13 @@ npm run lint
 ```text
 任务说明
    ↓
-Preflight Agent：外部视角基准 + 风险因素 + 可验证性
+SENSE：外部视角基准 + 确定性风险信号
+   ↓
+CHALLENGE：缺失上下文 + 危险假设 + 隐藏依赖
+   ↓
+DECIDE：概率 + 风险 + 自治路由
+   ↓
+GUARD：前置条件 + 验证步骤 + 中止条件
    ↓
 Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
    ↓
@@ -91,7 +103,7 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 }
 ```
 
-密钥只在服务端读取，浏览器不会接触 `OPENAI_API_KEY`。
+密钥只在服务端读取，浏览器不会接触 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`。
 
 ## 数据与知识层路线
 
@@ -107,6 +119,9 @@ Decision Token：概率 / 风险 / 路由 / 成本 / 验证计划
 
 - [x] 中英文 Preflight 产品原型
 - [x] OpenAI 结构化评估 Agent
+- [x] DeepSeek V4 / OpenAI 自动路由
+- [x] SENSE / CHALLENGE / DECIDE / GUARD 决策闭环
+- [x] 确定性风险信号与服务端路由守门器
 - [x] 本地降级与结果来源标记
 - [x] 预测账本与 Brier Score
 - [ ] 接入 GitHub Issue 与仓库元数据

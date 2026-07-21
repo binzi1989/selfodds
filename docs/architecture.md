@@ -15,20 +15,24 @@ Browser UI
           ▼
 POST /api/preflight
           │
-          ├─ 请求校验
-          ├─ 服务端密钥边界
-          ├─ OpenAI Responses API
-          ├─ Zod / JSON Schema 结构化输出
-          └─ 明确错误码
+          ├─ 请求校验与服务端密钥边界
+          ├─ SENSE：确定性风险信号与外部视角先验
+          ├─ CHALLENGE / DECIDE：DeepSeek V4 或 OpenAI
+          ├─ GUARD：服务端路由与风险下限
+          ├─ Zod / JSON Schema 结构化校验
+          └─ 提供商切换与明确错误码
           │
           ▼
 Decision Token
+  ├─ goal_summary / confidence_quality
   ├─ success_probability
   ├─ risk
   ├─ route
   ├─ estimated_minutes / estimated_cost_usd
   ├─ failure_modes
+  ├─ missing_context / preconditions
   ├─ verification_steps
+  ├─ abort_conditions / guardrails_applied
   ├─ policy
   └─ assumptions
 ```
@@ -45,7 +49,8 @@ Decision Token
 
 - API Key 只存在于服务端环境变量。
 - API 调用使用 `store: false`。
-- 模型输出必须通过严格 Schema。
+- DeepSeek 使用 JSON Output，OpenAI 使用 Structured Outputs；两者最终都必须通过同一 Zod Schema。
+- 服务端守门器只允许模型收紧风险，不能绕过概率阈值、高影响任务或上下文缺口。
 - Agent 不声称读取未提供的仓库内容。
 - 本地降级结果在 UI 和数据记录中有独立来源标记。
 - 当前系统只做评估，不执行外部写入或生产操作。

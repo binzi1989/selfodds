@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 
 async function fetchApp(path = "/", init = {}) {
@@ -21,6 +22,9 @@ test("server-renders the bilingual SelfOdds product shell", async () => {
   assert.match(html, /行动之前/);
   assert.match(html, /运行 PREFLIGHT/);
   assert.match(html, /真实结果账本/);
+  assert.match(html, /AGENT 决策闭环/);
+  assert.match(html, /缺失上下文/);
+  assert.match(html, /中止条件/);
   assert.match(html, /中文/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
@@ -35,4 +39,87 @@ test("preflight API fails closed when the server key is not configured", async (
   const payload = await response.json();
   assert.equal(payload.ok, false);
   assert.equal(payload.code, "AGENT_NOT_CONFIGURED");
+  assert.deepEqual(payload.configured_providers, []);
+});
+
+test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
+  let capturedBody = null;
+  const modelAssessment = {
+    goal_summary: "安全地完成支付数据库迁移并验证回滚能力",
+    success_probability: 90,
+    confidence_quality: "HIGH",
+    risk: "LOW",
+    route: "AUTORUN",
+    estimated_minutes: 45,
+    estimated_cost_usd: 1.4,
+    missing_context: [],
+    preconditions: ["在隔离数据库创建快照"],
+    failure_modes: ["迁移脚本可能破坏现有数据"],
+    verification_steps: ["运行迁移测试", "执行回滚测试"],
+    abort_conditions: ["发现不可回滚的数据变更时停止"],
+    policy: "仅在隔离环境执行并保留人工审查。",
+    assumptions: ["存在可复现的数据库测试环境"],
+  };
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    capturedBody = JSON.parse(body);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      id: "mock-deepseek",
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: "deepseek-v4-flash",
+      choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: JSON.stringify(modelAssessment) } }],
+      usage: { prompt_tokens: 120, completion_tokens: 180, total_tokens: 300 },
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const previous = {
+    provider: process.env.AI_PROVIDER,
+    deepseekKey: process.env.DEEPSEEK_API_KEY,
+    deepseekBase: process.env.DEEPSEEK_BASE_URL,
+    openaiKey: process.env.OPENAI_API_KEY,
+  };
+  const address = server.address();
+  process.env.AI_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "test-key";
+  process.env.DEEPSEEK_BASE_URL = `http://127.0.0.1:${address.port}`;
+  delete process.env.OPENAI_API_KEY;
+  t.after(() => {
+    for (const [key, value] of Object.entries({
+      AI_PROVIDER: previous.provider,
+      DEEPSEEK_API_KEY: previous.deepseekKey,
+      DEEPSEEK_BASE_URL: previous.deepseekBase,
+      OPENAI_API_KEY: previous.openaiKey,
+    })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const routeUrl = new URL("../app/api/preflight/route.ts", import.meta.url);
+  routeUrl.searchParams.set("test", `${Date.now()}-${Math.random()}`);
+  const { POST } = await import(routeUrl.href);
+  const result = await POST(new Request("http://localhost/api/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      task: "执行支付数据库 migration，并增加回滚测试",
+      repository: "github.com/acme/payments-api",
+      language: "zh",
+    }),
+  }));
+  const payload = await result.json();
+
+  assert.equal(result.status, 200);
+  assert.equal(payload.provider, "deepseek");
+  assert.deepEqual(payload.trace.stages, ["SENSE", "CHALLENGE", "DECIDE", "GUARD"]);
+  assert.equal(payload.assessment.route, "REVIEW");
+  assert.equal(payload.assessment.risk, "MEDIUM");
+  assert.ok(payload.assessment.guardrails_applied.length > 0);
+  assert.equal(capturedBody.model, "deepseek-v4-flash");
+  assert.deepEqual(capturedBody.response_format, { type: "json_object" });
 });

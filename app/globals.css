@@ -86,7 +86,13 @@ main { min-height: 100vh; overflow: hidden; }
 .result-panel { background: var(--ink); color: #f8f8ef; }
 .panel-heading.dark { color: #9fa8a1; }
 .sealed { color: var(--acid); }
-.source-chip { display: inline-block; margin: -15px 0 30px; border: 1px solid #44505a; color: #aeb8b1; padding: 6px 8px; font: 700 9px "Courier New", monospace; letter-spacing: .08em; }
+.source-chip { display: inline-block; margin: -15px 0 16px; border: 1px solid #44505a; color: #aeb8b1; padding: 6px 8px; font: 700 9px "Courier New", monospace; letter-spacing: .08em; }
+.agent-loop { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; color: #8e9991; font: 700 9px "Courier New", monospace; letter-spacing: .08em; }
+.agent-loop strong { color: var(--acid); margin-right: 4px; }
+.agent-loop span { border-bottom: 1px solid #44505a; padding-bottom: 3px; }
+.goal-summary { margin-bottom: 30px; padding: 15px 17px; border-left: 3px solid var(--acid); background: #252f38; }
+.goal-summary span { color: var(--acid); font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
+.goal-summary p { margin: 7px 0 0; font-size: 14px; line-height: 1.45; }
 .decision-topline { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
 .probability { font-size: clamp(76px, 8.5vw, 128px); line-height: .8; letter-spacing: -.08em; font-weight: 800; }
 .probability sup { font-size: .32em; color: var(--acid); vertical-align: top; margin-left: 5px; }
@@ -97,7 +103,7 @@ main { min-height: 100vh; overflow: hidden; }
 .confidence-track { height: 7px; margin: 34px 0 24px; background: #34404a; }
 .confidence-track span { display: block; height: 100%; background: var(--acid); transition: width .5s ease; }
 .risk-high .confidence-track span { background: var(--orange); }
-.estimate-grid { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #44505a; }
+.estimate-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #44505a; }
 .estimate-grid div { padding: 15px; border-right: 1px solid #44505a; }
 .estimate-grid div:last-child { border: 0; }
 .estimate-grid span { display: block; color: #8e9991; font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
@@ -106,9 +112,17 @@ main { min-height: 100vh; overflow: hidden; }
 .result-lists h2 { margin: 0 0 13px; color: #8e9991; font: 700 9px "Courier New", monospace; letter-spacing: .11em; }
 .result-lists ul, .result-lists ol { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; }
 .result-lists li { margin-bottom: 6px; }
+.decision-details { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 28px; background: #44505a; border: 1px solid #44505a; }
+.decision-details > div { min-width: 0; padding: 16px; background: var(--ink); }
+.decision-details h2 { margin: 0 0 12px; color: var(--acid); font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
+.decision-details ul { margin: 0; padding-left: 17px; font-size: 12px; line-height: 1.5; }
+.decision-details p { margin: 0; color: #aeb8b1; font-size: 12px; line-height: 1.5; }
 .policy-line { display: grid; grid-template-columns: 60px 1fr; gap: 15px; margin-top: 26px; padding-top: 20px; border-top: 1px solid #44505a; }
 .policy-line span { color: var(--acid); font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
 .policy-line p { margin: 0; font-size: 13px; line-height: 1.4; }
+.guardrail-line { display: grid; grid-template-columns: 110px 1fr; gap: 15px; margin-top: 18px; color: #f6bb72; }
+.guardrail-line span { font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
+.guardrail-line ul { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
 .assumptions { margin-top: 18px; padding-top: 16px; border-top: 1px solid #44505a; color: #aeb8b1; font-size: 12px; }
 .assumptions summary { cursor: pointer; color: var(--acid); font: 700 9px "Courier New", monospace; letter-spacing: .1em; }
 .assumptions ul { margin: 11px 0 0; padding-left: 18px; line-height: 1.5; }
@@ -179,6 +193,7 @@ footer > span { justify-self: end; color: #8f9993; }
   .estimate-grid { grid-template-columns: 1fr; }
   .estimate-grid div { border-right: 0; border-bottom: 1px solid #44505a; }
   .result-lists { grid-template-columns: 1fr; }
+  .decision-details { grid-template-columns: 1fr; }
   .ledger { padding: 62px 20px; }
   .section-title-row { display: block; }
   .view-tabs { margin-top: 25px; width: max-content; }

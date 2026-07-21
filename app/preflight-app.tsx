@@ -23,22 +23,47 @@ type Run = {
   assumptions: string[];
   source: Source;
   model: string;
+  provider?: string;
+  latencyMs?: number;
+  goalSummary?: string;
+  confidenceQuality?: "LOW" | "MEDIUM" | "HIGH";
+  missingContext?: string[];
+  preconditions?: string[];
+  abortConditions?: string[];
+  guardrails?: string[];
+  riskSignals?: string[];
+  stages?: string[];
 };
 
 type AgentResponse = {
   ok: boolean;
   source?: "agent";
+  provider?: "deepseek" | "openai";
   model?: string;
+  latency_ms?: number;
+  agent_version?: string;
   assessment?: {
+    goal_summary: string;
     success_probability: number;
+    confidence_quality: "LOW" | "MEDIUM" | "HIGH";
     estimated_cost_usd: number;
     estimated_minutes: number;
     route: Run["route"];
     risk: Run["risk"];
+    missing_context: string[];
+    preconditions: string[];
     failure_modes: string[];
     verification_steps: string[];
+    abort_conditions: string[];
     policy: string;
     assumptions: string[];
+    guardrails_applied: string[];
+  };
+  trace?: {
+    stages: string[];
+    outside_view_prior: number;
+    risk_signals: string[];
+    attempted_providers: string[];
   };
   code?: string;
   message?: string;
@@ -63,7 +88,7 @@ const copy = {
     taskPlaceholder: "描述 Agent 需要完成的任务……",
     repoContext: "仓库或上下文",
     repoPlaceholder: "github.com/组织/仓库",
-    modelRoute: "模型路由：自动",
+    modelRoute: "模型路由：DeepSeek → OpenAI → 本地",
     verifier: "验证器：测试 + DIFF",
     assessing: "AGENT 评估中",
     run: "运行 PREFLIGHT",
@@ -79,6 +104,14 @@ const copy = {
     requiredVerification: "必须验证",
     policy: "策略",
     assumptions: "关键假设",
+    agentLoop: "AGENT 决策闭环",
+    goalSummary: "目标复述",
+    evidenceQuality: "证据质量",
+    missingContextTitle: "缺失上下文",
+    preconditions: "执行前置条件",
+    abortConditions: "中止条件",
+    guardrails: "守门器调整",
+    noMissingContext: "未发现关键上下文缺口",
     realityLedger: "真实结果账本",
     ledgerTitle: "让自信接受结果检验。",
     runs: "运行记录",
@@ -124,7 +157,7 @@ const copy = {
     taskPlaceholder: "Describe what the agent should accomplish...",
     repoContext: "REPOSITORY OR CONTEXT",
     repoPlaceholder: "github.com/org/repo",
-    modelRoute: "MODEL ROUTE: AUTO",
+    modelRoute: "MODEL ROUTE: DEEPSEEK → OPENAI → LOCAL",
     verifier: "VERIFIER: TEST + DIFF",
     assessing: "ASSESSING TASK",
     run: "RUN PREFLIGHT",
@@ -140,6 +173,14 @@ const copy = {
     requiredVerification: "REQUIRED VERIFICATION",
     policy: "POLICY",
     assumptions: "KEY ASSUMPTIONS",
+    agentLoop: "AGENT DECISION LOOP",
+    goalSummary: "GOAL RESTATEMENT",
+    evidenceQuality: "EVIDENCE QUALITY",
+    missingContextTitle: "MISSING CONTEXT",
+    preconditions: "PRECONDITIONS",
+    abortConditions: "ABORT CONDITIONS",
+    guardrails: "GUARD ADJUSTMENTS",
+    noMissingContext: "No material context gaps detected",
     realityLedger: "REALITY LEDGER",
     ledgerTitle: "Confidence meets consequence.",
     runs: "RUNS",
@@ -323,6 +364,22 @@ function createLocalAssessment(task: string, repo: string, language: Language): 
     assumptions: [zh ? "未读取仓库文件，仅根据任务描述评估" : "No repository files were read; assessment uses the task brief only"],
     source: "local",
     model: "local-rules-v1",
+    provider: "local",
+    goalSummary: task.trim(),
+    confidenceQuality: "LOW",
+    missingContext: [
+      ...(!repo.trim() ? [zh ? "需要仓库结构、关键文件或可复现环境" : "Repository structure, relevant files, or a reproducible environment"] : []),
+      ...(ambiguity ? [zh ? "需要更明确的成功标准与范围边界" : "Clearer success criteria and scope boundaries"] : []),
+    ],
+    preconditions: zh
+      ? ["确认成功标准和允许修改的范围", "在隔离环境保留可回滚点"]
+      : ["Confirm success criteria and the allowed change surface", "Create a rollback point in an isolated environment"],
+    abortConditions: zh
+      ? ["验证环境不可用或最终差异超出任务范围时停止"]
+      : ["Stop when verification is unavailable or the final diff exceeds task scope"],
+    guardrails: [],
+    riskSignals: risks,
+    stages: ["SENSE", "GUARD"],
   };
 }
 
@@ -344,7 +401,17 @@ function mapAgentAssessment(response: AgentResponse, task: string, repo: string,
     policy: assessment.policy,
     assumptions: assessment.assumptions,
     source: "agent",
-    model: response.model || "OpenAI",
+    model: response.model || "AI model",
+    provider: response.provider || "agent",
+    latencyMs: response.latency_ms,
+    goalSummary: assessment.goal_summary,
+    confidenceQuality: assessment.confidence_quality,
+    missingContext: assessment.missing_context,
+    preconditions: assessment.preconditions,
+    abortConditions: assessment.abort_conditions,
+    guardrails: assessment.guardrails_applied,
+    riskSignals: response.trace?.risk_signals || [],
+    stages: response.trace?.stages || ["SENSE", "CHALLENGE", "DECIDE", "GUARD"],
   };
 }
 
@@ -428,7 +495,7 @@ export function PreflightApp() {
       const response = await request.json() as AgentResponse;
       if (!request.ok || !response.ok || !response.assessment) throw new Error(response.code || "AGENT_UNAVAILABLE");
       assessment = mapAgentAssessment(response, task, repo, language);
-      setNotice(t.agentReady);
+      setNotice(`${t.agentReady} ${response.provider ? `${response.provider.toUpperCase()} · ` : ""}${response.model || ""}`.trim());
     } catch {
       assessment = createLocalAssessment(task, repo, language);
       setNotice(t.fallback);
@@ -451,7 +518,11 @@ export function PreflightApp() {
   }
 
   function sourceLabel(run: Run) {
-    if (run.source === "agent") return `${t.agentSource} · ${run.model}`;
+    if (run.source === "agent") {
+      const provider = run.provider ? `${run.provider.toUpperCase()} · ` : "";
+      const latency = run.latencyMs ? ` · ${run.latencyMs}ms` : "";
+      return `${t.agentSource} · ${provider}${run.model}${latency}`;
+    }
     if (run.source === "sample") return t.sampleSource;
     return t.localSource;
   }
@@ -505,6 +576,15 @@ export function PreflightApp() {
             <span>{t.decisionToken}</span><span className="sealed">{t.sealed} · {activeRun.createdAt}</span>
           </div>
           <div className="source-chip">{sourceLabel(activeRun)}</div>
+          <div className="agent-loop" aria-label={t.agentLoop}>
+            <strong>{t.agentLoop}</strong>
+            {(activeRun.stages || ["SENSE", "GUARD"]).map((stage, index, stages) => (
+              <span key={stage}>{stage}{index < stages.length - 1 ? " →" : ""}</span>
+            ))}
+          </div>
+          {activeRun.goalSummary && (
+            <div className="goal-summary"><span>{t.goalSummary}</span><p>{activeRun.goalSummary}</p></div>
+          )}
           <div className="decision-topline">
             <div className="probability-wrap"><div className="probability">{activeRun.probability}<sup>%</sup></div><span>{t.successProbability}</span></div>
             <div className="route-badge"><span>{t.route}</span><strong>{activeRun.route}</strong></div>
@@ -512,6 +592,7 @@ export function PreflightApp() {
           <div className="confidence-track" aria-label={`${activeRun.probability}%`}><span style={{ width: `${activeRun.probability}%` }} /></div>
           <div className="estimate-grid">
             <div><span>{t.risk}</span><strong>{riskLabel(activeRun.risk)}</strong></div>
+            <div><span>{t.evidenceQuality}</span><strong>{activeRun.confidenceQuality || "LOW"}</strong></div>
             <div><span>{t.time}</span><strong>{activeRun.minutes} {t.minutes}</strong></div>
             <div><span>{t.cost}</span><strong>${activeRun.cost.toFixed(2)}</strong></div>
           </div>
@@ -519,7 +600,20 @@ export function PreflightApp() {
             <div><h2>{t.failureModes}</h2><ul>{activeRun.risks.map((risk) => <li key={risk}>{risk}</li>)}</ul></div>
             <div><h2>{t.requiredVerification}</h2><ol>{activeRun.checks.map((check) => <li key={check}>{check}</li>)}</ol></div>
           </div>
+          <div className="decision-details">
+            <div>
+              <h2>{t.missingContextTitle}</h2>
+              {(activeRun.missingContext || []).length > 0
+                ? <ul>{activeRun.missingContext!.map((item) => <li key={item}>{item}</li>)}</ul>
+                : <p>{t.noMissingContext}</p>}
+            </div>
+            <div><h2>{t.preconditions}</h2><ul>{(activeRun.preconditions || []).map((item) => <li key={item}>{item}</li>)}</ul></div>
+            <div><h2>{t.abortConditions}</h2><ul>{(activeRun.abortConditions || []).map((item) => <li key={item}>{item}</li>)}</ul></div>
+          </div>
           <div className="policy-line"><span>{t.policy}</span><p>{activeRun.policy}</p></div>
+          {(activeRun.guardrails || []).length > 0 && (
+            <div className="guardrail-line"><span>{t.guardrails}</span><ul>{activeRun.guardrails!.map((item) => <li key={item}>{item}</li>)}</ul></div>
+          )}
           {activeRun.assumptions.length > 0 && (
             <details className="assumptions"><summary>{t.assumptions}</summary><ul>{activeRun.assumptions.map((item) => <li key={item}>{item}</li>)}</ul></details>
           )}
