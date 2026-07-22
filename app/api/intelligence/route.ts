@@ -10,7 +10,7 @@ export async function GET() {
       total: 0,
       pending: 0,
       resolved: 0,
-      leaderboard: { models: [], runners: [] },
+      leaderboard: { models: [], runners: [], profiles: [], specialists: [] },
       calibration_bins: [],
       failure_patterns: [],
       knowledge_graph: { nodes: [], edges: [] },

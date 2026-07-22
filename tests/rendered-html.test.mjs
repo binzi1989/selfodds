@@ -29,6 +29,7 @@ test("server-renders the bilingual SelfOdds product shell", async () => {
   assert.match(html, /项目机会/);
   assert.match(html, /任务执行/);
   assert.match(html, /Agent 审计/);
+  assert.match(html, /专家会审/);
   assert.match(html, /评判标准/);
   assert.match(html, /缺失上下文/);
   assert.match(html, /中止条件/);
@@ -42,6 +43,19 @@ test("preflight API fails closed when the server key is not configured", async (
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ task: "修复支付回调重复处理并补充幂等性测试", language: "zh" }),
+  });
+  assert.equal(response.status, 503);
+  const payload = await response.json();
+  assert.equal(payload.ok, false);
+  assert.equal(payload.code, "AGENT_NOT_CONFIGURED");
+  assert.deepEqual(payload.configured_providers, []);
+});
+
+test("Agency council fails closed when no model provider is configured", async () => {
+  const response = await fetchApp("/api/agency", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task: "审查支付回调幂等性实现并给出验证计划", language: "zh" }),
   });
   assert.equal(response.status, 503);
   const payload = await response.json();
@@ -144,6 +158,92 @@ test("DeepSeek provider returns a guarded four-stage decision", async (t) => {
   assert.ok(payload.assessment.guardrails_applied.length > 0);
   assert.equal(capturedBody.model, "deepseek-v4-flash");
   assert.deepEqual(capturedBody.response_format, { type: "json_object" });
+});
+
+test("Agency council runs three independent specialists and seals deterministic consensus", async (t) => {
+  const capturedBodies = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const parsed = JSON.parse(body);
+    capturedBodies.push(parsed);
+    const system = parsed.messages?.[0]?.content || "";
+    const probability = system.includes("Backend Architect") ? 70 : system.includes("Data Engineer") ? 50 : 90;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      id: `mock-agency-${capturedBodies.length}`,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: "deepseek-v4-flash",
+      choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: JSON.stringify({
+        probability,
+        confidence: "MEDIUM",
+        risk: "MEDIUM",
+        route: "REVIEW",
+        verdict: "可以执行，但必须先验证幂等键与事务边界。",
+        findings: ["回调可能被重复投递", "需要验证并发事务边界"],
+        missing_context: ["缺少当前幂等键约束"],
+        assumptions: ["仓库包含支付模块测试"],
+        preconditions: ["使用隔离测试数据库"],
+        failure_modes: ["并发回调可能重复记账"],
+        verification_steps: ["运行幂等性测试", "检查最终 Diff 范围"],
+        abort_conditions: ["无法复现重复回调时停止"],
+        estimated_minutes: 35,
+        estimated_cost_usd: 0.4,
+        veto_reason: null,
+      }) } }],
+      usage: { prompt_tokens: 100, completion_tokens: 100, total_tokens: 200 },
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const previous = {
+    provider: process.env.AI_PROVIDER,
+    deepseekKey: process.env.DEEPSEEK_API_KEY,
+    deepseekBase: process.env.DEEPSEEK_BASE_URL,
+    openaiKey: process.env.OPENAI_API_KEY,
+  };
+  const address = server.address();
+  process.env.AI_PROVIDER = "deepseek";
+  process.env.DEEPSEEK_API_KEY = "test-key";
+  process.env.DEEPSEEK_BASE_URL = `http://127.0.0.1:${address.port}`;
+  delete process.env.OPENAI_API_KEY;
+  t.after(() => {
+    for (const [key, value] of Object.entries({
+      AI_PROVIDER: previous.provider,
+      DEEPSEEK_API_KEY: previous.deepseekKey,
+      DEEPSEEK_BASE_URL: previous.deepseekBase,
+      OPENAI_API_KEY: previous.openaiKey,
+    })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const routeUrl = new URL("../app/api/agency/route.ts", import.meta.url);
+  routeUrl.searchParams.set("test", `${Date.now()}-${Math.random()}`);
+  const { POST } = await import(routeUrl.href);
+  const result = await POST(new Request("http://localhost/api/agency", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      task: "修复支付回调 API 的重复处理并补充数据库幂等性测试",
+      repository: "",
+      language: "zh",
+    }),
+  }));
+  const payload = await result.json();
+
+  assert.equal(result.status, 200);
+  assert.equal(capturedBodies.length, 3);
+  assert.equal(payload.orchestration.experts.length, 3);
+  assert.equal(payload.orchestration.consensus.probability, 70);
+  assert.deepEqual(payload.orchestration.consensus.spread, { minimum: 50, maximum: 90 });
+  assert.equal(payload.assessment.route, "REVIEW");
+  assert.equal(payload.assessment.success_probability, 70);
+  assert.deepEqual(payload.trace.stages, ["EVIDENCE", "ROUTE", "INDEPENDENT_REVIEW", "CONSENSUS", "SEAL"]);
+  assert.ok(capturedBodies.every((value) => !JSON.stringify(value).includes("<thinking>")));
 });
 
 test("non-project modes normalize nullable evidence ledgers before strict validation", async () => {
@@ -278,6 +378,6 @@ test("runner intelligence API degrades honestly when D1 is unavailable", async (
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.equal(payload.storage_available, false);
-  assert.deepEqual(payload.leaderboard, { models: [], runners: [] });
+  assert.deepEqual(payload.leaderboard, { models: [], runners: [], profiles: [], specialists: [] });
   assert.deepEqual(payload.knowledge_graph, { nodes: [], edges: [] });
 });

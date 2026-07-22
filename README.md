@@ -17,7 +17,7 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 
 - 默认中文界面，可一键切换英文。
 - 服务端 Preflight Agent，支持 DeepSeek V4 与 OpenAI 双提供商自动路由。
-- 三种评估模式：项目机会、任务执行、用户 Agent 审计。
+- 四种评估模式：项目机会、任务执行、用户 Agent 审计、Agency 专家会审。
 - GitHub URL 自动研究：读取仓库元数据、README、根目录结构、活跃度、语言与许可证，再把证据交给模型。
 - GitHub Issue / PR 证据：采样最近更新的 Issue 与 PR、标签、开闭状态，并支持直接输入指定 Issue 链接。
 - 项目模式严格区分“机会分”和“最小实验执行成功率”，避免把热度、价值和可执行性混成一个数字。
@@ -29,6 +29,8 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 - D1 运行智能：模型与 Runner 排行榜、真实概率分桶、Brier Score、失败类型和关系图谱。
 - 基于真实结算记录的经验贝叶斯概率校准器；少于 5 条同模型样本时保持原概率，避免小样本误校准。
 - Agent 审计模式检查用户 Agent 的显式提示词、计划或输出，生成推理缺口、对抗测试、验证计划和改进指令。
+- Agency 专家会审模式：从 AI Engineer、Backend Architect、Data Engineer、Prompt Engineer 四个角色中自动选择最相关的 3 位，独立评估后由服务端确定性聚合概率、分歧与自治路由。
+- 每位专家的预测作为独立票据进入运行账本；Runner 结算后按角色计算 Brier Score，为后续角色选择与概率校准提供真实反馈。
 - 四阶段决策闭环：`SENSE → CHALLENGE → DECIDE → GUARD`。
 - 先计算确定性的外部视角风险信号，再由模型挑战假设，最后由守门器阻止过度乐观的自动执行。
 - 严格结构化输出：目标复述、概率、证据质量、风险、路由、缺失上下文、前置条件、失败模式、验证步骤和中止条件。
@@ -38,6 +40,12 @@ SelfOdds 是一个面向 AI Agent 的执行前风控与校准系统。它在 Age
 - 响应式界面和中英文文案。
 
 ## 最近更新
+
+### 2026-07-22 · Agency Agents 专家会审
+
+- 接入 [agency-agents](https://github.com/msitarzewski/agency-agents) 的四个工程角色，并把项目级 Codex 配置纳入版本控制。
+- 新增三专家独立会审、确定性共识聚合与分歧守门；专家共识不会替代 Runner 的真实验证。
+- 新增按专家保存、结算和评估预测的闭环，同时明确不请求、不返回、也不保存隐藏思维链。
 
 ### 2026-07-21 · DeepSeek 稳定性与模式化校验
 
@@ -81,6 +89,12 @@ GITHUB_TOKEN=
 
 `auto` 默认按 DeepSeek → OpenAI → 本地规则的顺序路由。也可把 `AI_PROVIDER` 设置为 `openai`，让 OpenAI 优先。不要把真实密钥提交到 Git；只有占位的 `.env.example` 会进入版本控制。
 
+### 开发期 Agency 子智能体
+
+仓库在 [`.codex/agents`](.codex/agents) 固化了四个项目级 Codex 角色配置，供开发、审查和并行子任务使用。克隆仓库后应保留这些 TOML 文件，并在新的 Codex 任务中按需创建对应子智能体。
+
+这些配置不是生产依赖：线上 `/api/agency` 使用服务端运行时注册表与结构化输出协议，不会读取或执行本地 TOML。角色来源、职责、同步方式与隐私边界见 [Agency Agents 集成说明](docs/agency-agents.md)。
+
 ### 运行真实 Runner
 
 先在“任务执行”模式生成预测。结果卡会显示一个 Runner ID。然后在需要验证的目标仓库执行：
@@ -105,6 +119,8 @@ npm run lint
    ↓
 GitHub Evidence：元数据 + README + 根目录结构
    ↓
+Agency（可选）：四角色注册表 → 自动选择 Top 3 → 并行独立评估 → 中位数与分歧守门
+   ↓
 SENSE：外部视角基准 + 确定性风险信号
    ↓
 CHALLENGE：缺失上下文 + 危险假设 + 隐藏依赖
@@ -128,6 +144,7 @@ SelfOdds Runner：显式测试命令 + 构建命令 + Git Diff
 - [Agent API](docs/agent-api.md)
 - [Runner 闭环](docs/runner.md)
 - [公开评判与自动校准标准](docs/evaluation-standard.md)
+- [Agency Agents 集成与专家闭环](docs/agency-agents.md)
 
 ## API
 
@@ -145,6 +162,8 @@ SelfOdds Runner：显式测试命令 + 构建命令 + Git Diff
 ```
 
 `mode` 可选 `project`、`task`、`agent` 或 `auto`。项目模式返回机会评分量表和推荐最小实验；任务模式预测执行成功率；Agent 模式审计用户提供的 Agent 提示词、计划或输出。
+
+`POST /api/agency` 接收相同的 `task`、`repository` 与 `language` 字段。它自动选择 Top 3 专家，返回总体 `assessment`，以及包含任务分类、团队版本、专家票、概率区间、共识度和合成方法的 `orchestration`。可运行任务还会返回用于 Runner 结算的 `runner_record`。
 
 密钥只在服务端读取，浏览器不会接触 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`。
 
@@ -179,8 +198,11 @@ SelfOdds Runner：显式测试命令 + 构建命令 + Git Diff
 - [x] D1 持久化与团队 / 模型排行榜
 - [x] 基于真实运行的概率校准器 MVP
 - [x] 失败模式知识库与关系图谱 MVP
+- [x] Agency Agents 四角色配置与三专家会审
+- [x] 专家票据随 Runner 结算并按角色计算 Brier Score
 - [ ] Runner 隔离容器、资源限额与 GitHub Actions 执行器
 - [ ] 基于数百条真实样本的分任务校准模型
+- [ ] 基于已结算样本的专家选择器、漂移监控与角色扩展机制
 
 ## English
 

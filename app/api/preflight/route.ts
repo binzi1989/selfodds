@@ -524,6 +524,7 @@ export async function POST(request: Request) {
         ? await assessWithDeepSeek(parsed.data.task, parsed.data.repository, parsed.data.language, signals, mode, repositoryEvidence)
         : await assessWithOpenAI(parsed.data.task, parsed.data.repository, parsed.data.language, signals, mode, repositoryEvidence);
       let normalized = normalizeOpportunityScore(result.assessment, mode);
+      const rawSuccessProbability = normalized.success_probability;
       let probabilityCalibration: { raw: number; calibrated: number; sample_size: number; method: string } | null = null;
       if (mode === "task") {
         try {
@@ -586,6 +587,9 @@ export async function POST(request: Request) {
             provider: result.provider,
             model: result.model,
             successProbability: guarded.success_probability,
+            rawProbability: rawSuccessProbability,
+            calibratedProbability: guarded.success_probability,
+            calibration: probabilityCalibration,
             route: guarded.route,
             risk: guarded.risk,
             assessment: guarded,

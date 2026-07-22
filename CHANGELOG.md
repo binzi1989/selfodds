@@ -2,6 +2,22 @@
 
 本文件记录面向用户的重要能力、行为变化与可靠性修复。日期使用北京时间。
 
+## 2026-07-22 · Agency Agents 专家会审与角色级校准
+
+### 新增
+
+- 接入 [agency-agents](https://github.com/msitarzewski/agency-agents) 的 AI Engineer、Backend Architect、Data Engineer、Prompt Engineer 四个工程角色。
+- 新增项目级 Codex 角色配置 `.codex/agents/*.toml`，用于开发期子智能体协作，并纳入仓库版本控制以便团队复现。
+- 新增 `/api/agency` 专家会审入口：根据任务类型从四个角色中选择 Top 3，以同一提供商并行进行独立结构化评估。
+- 新增服务端确定性共识聚合：使用专家概率中位数，公开预测范围与共识度，并通过分歧与否决信号收紧自治路由。
+- 新增 D1 `agency_votes` 专家票据；Agency 总体运行继续写入 `agent_runs`，Runner 结算时同步回填每位专家的真实结果、原始 / 校准后 Brier Score。
+
+### 边界与隐私
+
+- 开发期 `.codex/agents` TOML 与线上运行时注册表相互独立；生产 API 不读取本地 Codex 配置。
+- 专家接口只返回并保存概率、风险、路由、结论、发现与可选否决原因等结构化判断，不请求、不返回、也不保存隐藏思维链。
+- 专家共识仍是执行前预测；PASS / FAIL 只能由 Runner 的测试、构建和 Diff 事实结算。
+
 ## 2026-07-21 · Runner、D1 运行智能与失败知识图谱
 
 ### 新增

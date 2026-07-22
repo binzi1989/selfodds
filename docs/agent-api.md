@@ -16,6 +16,8 @@ Content-Type: application/json
 | `language` | `zh` / `en` | 否 | 输出语言，默认中文 |
 | `mode` | `auto` / `project` / `task` / `agent` | 否 | 项目机会、任务执行或用户 Agent 审计；默认自动识别 |
 
+Agency 专家会审使用 `POST /api/agency`，接收相同的 `task`、`repository` 与 `language`。服务端自动选择三位专家并行独立评估，并返回 `orchestration.experts`、概率范围、共识度、确定性合成方法和可由 Runner 结算的 `runner_record`。完整协议与边界见 [Agency Agents 集成与专家闭环](agency-agents.md)。
+
 ## Success response
 
 ```json
